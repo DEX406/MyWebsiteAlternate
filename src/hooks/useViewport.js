@@ -49,8 +49,13 @@ export function useViewport() {
     const z = zoomRef.current;
     if (!interactingRef.current) {
       interactingRef.current = true;
-      if (canvasContentRef.current) canvasContentRef.current.style.willChange = 'transform';
-      if (canvasHandlesRef.current) canvasHandlesRef.current.style.willChange = 'transform';
+      // Only promote to compositor layer at ≤100% zoom — above 100% we need
+      // the browser to re-rasterize every frame to keep images crisp and avoid
+      // blurry flickering from upscaled cached textures.
+      if (z <= 1) {
+        if (canvasContentRef.current) canvasContentRef.current.style.willChange = 'transform';
+        if (canvasHandlesRef.current) canvasHandlesRef.current.style.willChange = 'transform';
+      }
     }
     if (canvasContentRef.current)
       canvasContentRef.current.style.transform = `translate(${x}px,${y}px) scale(${z})`;
