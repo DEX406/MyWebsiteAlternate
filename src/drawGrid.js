@@ -104,15 +104,24 @@ function initGL(canvas) {
   return { gl, u };
 }
 
+// Cap backing-store pixels to avoid overwhelming mobile GPUs.
+// iPhone 3x DPR would produce ~3000 px² canvases otherwise — way too many
+// fragments per frame for a 120 Hz display.  DPR 2 is visually identical on
+// small screens and cuts pixel count by 56 %.
+const MAX_DPR = 2;
+const MAX_CANVAS_PX = 2048; // hard cap per axis
+
 export function drawGrid(canvas, panX, panY, zoom, bgGrid) {
   if (!bgGrid.enabled) return;
 
-  const dpr = window.devicePixelRatio || 1;
+  const rawDpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
   const parent = canvas.parentElement;
   // Always a square large enough to cover the viewport in any dimension.
   // Centered via CSS translate(-50%,-50%), so it bleeds equally on all sides.
   const cssSize = Math.ceil(Math.hypot(parent.clientWidth, parent.clientHeight));
-  const px = Math.round(cssSize * dpr);
+  const px = Math.min(Math.round(cssSize * rawDpr), MAX_CANVAS_PX);
+  // Effective DPR may differ from rawDpr when the pixel cap kicks in
+  const dpr = px / cssSize;
 
   canvas.style.width  = cssSize + 'px';
   canvas.style.height = cssSize + 'px';

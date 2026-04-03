@@ -34,6 +34,8 @@ export function useViewport() {
         if (canvasContentRef.current) canvasContentRef.current.style.willChange = '';
         if (canvasHandlesRef.current) canvasHandlesRef.current.style.willChange = '';
       }
+      // Force a clean grid redraw (resets any CSS-transform offset)
+      if (drawBgRef.current) drawBgRef.current(true);
       if (onSettledRef.current) onSettledRef.current();
     }, delay);
   }, []);

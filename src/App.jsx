@@ -75,35 +75,57 @@ export default function App() {
   const vp = useViewport();
   const { canvasRef, canvasContentRef, canvasHandlesRef, bgCanvasRef, drawBgRef, posDisplayRef, zoomDisplayRef, applyTransform, updateDisplays, viewCenter, zoomTo, animateTo, goHome, setHome } = vp;
 
-  // Wire up procedural grid background drawing
+  // Wire up procedural grid background drawing.
+  // During fast panning we CSS-translate the grid canvas instead of redrawing
+  // WebGL every frame.  This avoids hammering the mobile GPU (especially on
+  // 120 Hz iOS devices) and prevents Safari crashes.
+  const lastGridDrawRef = useRef({ x: 0, y: 0, z: 1, t: 0 });
+  const GRID_REDRAW_MS = 50; // max one WebGL draw per 50 ms during interaction
+
   useEffect(() => {
-    drawBgRef.current = () => {
+    drawBgRef.current = (forceRedraw) => {
       const canvas = bgCanvasRef.current;
       if (!canvas) return;
       const z = vp.zoomRef.current;
+      const { x: px, y: py } = vp.panRef.current;
       const enabled = bgGridRef.current.enabled;
       // Fade: full opacity at zoom≥100%, linear fade to 0 at zoom=50%, hidden below
       const fade = z >= 1 ? 1 : z <= 0.5 ? 0 : (z - 0.5) / 0.5;
       const visible = enabled && fade > 0;
       canvas.style.display = visible ? "" : "none";
-      if (visible) {
-        canvas.style.opacity = fade;
-        drawGrid(canvas, vp.panRef.current.x, vp.panRef.current.y, z, bgGridRef.current);
+      if (!visible) return;
+      canvas.style.opacity = fade;
+
+      const last = lastGridDrawRef.current;
+      const now = performance.now();
+      const zoomChanged = z !== last.z;
+
+      // If zoom changed, or explicitly forced, or enough time elapsed → full redraw
+      if (forceRedraw || zoomChanged || now - last.t >= GRID_REDRAW_MS) {
+        // Reset CSS offset and do a real WebGL draw
+        canvas.style.transform = 'translate(-50%,-50%)';
+        drawGrid(canvas, px, py, z, bgGridRef.current);
+        lastGridDrawRef.current = { x: px, y: py, z, t: now };
+      } else {
+        // Cheap path: CSS-translate the canvas by the pan delta since last draw
+        const dx = px - last.x;
+        const dy = py - last.y;
+        canvas.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
       }
     };
-    drawBgRef.current();
+    drawBgRef.current(true);
   }, []);
 
   // Redraw when bgGrid settings change
   useEffect(() => {
-    if (drawBgRef.current) drawBgRef.current();
+    if (drawBgRef.current) drawBgRef.current(true);
   }, [bgGrid]);
 
   // Redraw when the viewport container resizes (window resize, mobile chrome, etc.)
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => { if (drawBgRef.current) drawBgRef.current(); });
+    const ro = new ResizeObserver(() => { if (drawBgRef.current) drawBgRef.current(true); });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
