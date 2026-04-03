@@ -71,11 +71,19 @@ export function useMipmap(items, updateItem, vp) {
       if (!item.srcQ50 && !item.srcQ25 && !item.srcQ12 && !item.srcQ6) continue; // no variants available
 
       const isOnscreen = itemIsOnscreen(item, bounds);
-      const targetSrc = pickTier(item, zoom, isOnscreen);
 
-      if (targetSrc !== item.displaySrc) {
-        updateItem(item.id, { displaySrc: targetSrc });
+      if (!isOnscreen) {
+        // Cull off-screen images entirely instead of swapping to a low-res
+        // variant — the swap causes heavy lag on iOS.
+        if (!item.culled) updateItem(item.id, { culled: true });
+        continue;
       }
+
+      const targetSrc = pickTier(item, zoom);
+      const updates = {};
+      if (item.culled) updates.culled = false;
+      if (targetSrc !== item.displaySrc) updates.displaySrc = targetSrc;
+      if (Object.keys(updates).length) updateItem(item.id, updates);
     }
   }, [vp, updateItem]);
 
@@ -103,13 +111,8 @@ function itemIsOnscreen(item, bounds) {
            item.y > bounds.bottom || itemBottom < bounds.top);
 }
 
-function pickTier(item, zoom, isOnscreen) {
-  // Off-screen: always use smallest available variant
-  if (!isOnscreen) {
-    return item.srcQ6 || item.srcQ12 || item.srcQ25 || item.srcQ50 || item.src;
-  }
-
-  // On-screen: DPI-aware selection
+function pickTier(item, zoom) {
+  // DPI-aware selection
   // renderedWidth = the CSS pixel width this item occupies on screen
   const renderedWidth = item.w * zoom;
 
