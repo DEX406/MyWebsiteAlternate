@@ -61,29 +61,30 @@ export function useMipmap(items, updateItem, vp) {
     }
   }, [items, updateItem]);
 
-  // Compute display sources for all image items whenever viewport settles
+  // Compute display sources only for items within the viewport (+ 50% padding).
+  // Off-screen items keep whatever displaySrc they already have.
   const computeDisplaySources = useCallback(() => {
     const bounds = vp.getViewportBounds();
+    const padX = (bounds.right - bounds.left) * 0.5;
+    const padY = (bounds.bottom - bounds.top) * 0.5;
+    const padded = {
+      left: bounds.left - padX,
+      top: bounds.top - padY,
+      right: bounds.right + padX,
+      bottom: bounds.bottom + padY,
+    };
     const zoom = vp.zoomRef.current;
 
     for (const item of itemsRef.current) {
       if (item.type !== 'image' || !item.src) continue;
-      if (!item.srcQ50 && !item.srcQ25 && !item.srcQ12 && !item.srcQ6) continue; // no variants available
+      if (!item.srcQ50 && !item.srcQ25 && !item.srcQ12 && !item.srcQ6) continue;
 
-      const isOnscreen = itemIsOnscreen(item, bounds);
-
-      if (!isOnscreen) {
-        // Cull off-screen images entirely instead of swapping to a low-res
-        // variant — the swap causes heavy lag on iOS.
-        if (!item.culled) updateItem(item.id, { culled: true });
-        continue;
-      }
+      if (!itemIsOnscreen(item, padded)) continue; // skip — leave as-is
 
       const targetSrc = pickTier(item, zoom);
-      const updates = {};
-      if (item.culled) updates.culled = false;
-      if (targetSrc !== item.displaySrc) updates.displaySrc = targetSrc;
-      if (Object.keys(updates).length) updateItem(item.id, updates);
+      if (targetSrc !== item.displaySrc) {
+        updateItem(item.id, { displaySrc: targetSrc });
+      }
     }
   }, [vp, updateItem]);
 

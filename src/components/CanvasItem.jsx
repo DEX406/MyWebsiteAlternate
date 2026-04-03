@@ -162,9 +162,6 @@ const applyBg = (item) => {
 export function CanvasItem({ item, renderHandles, selectedIds, isAdmin, editingTextId, globalShadow, deleteItems, updateItem, setEditingTextId }) {
   const isSel = selectedIds.includes(item.id) && isAdmin;
 
-  // Cull off-screen items — skip both content and handles unless selected
-  if (item.culled && !isSel) return null;
-
   if (renderHandles && !isSel) return null;
 
   // Connector type — delegate to specialized components
