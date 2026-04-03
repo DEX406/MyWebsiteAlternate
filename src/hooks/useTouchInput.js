@@ -1,0 +1,335 @@
+import { useRef, useCallback, useEffect } from 'react';
+import { snap, snapAngle, computeResize } from '../utils.js';
+import { MIN_ZOOM, MAX_ZOOM } from './useViewport.js';
+
+const TOUCH_TAP_THRESHOLD = 10;
+
+export function useTouchInput({
+  vp, loading,
+  itemsRef, isAdminRef, selectedIdsRef,
+  setItems, setSelectedIds, setEditingTextId,
+  setDragging, draggingRef,
+  effectiveSnapRef,
+  scheduleSave, animateTo, pushUndo,
+  multiSelectModeRef, setMultiSelectMode,
+}) {
+  const { panRef, zoomRef, isPanningRef, panStartRef, canvasRef, applyTransform, updateDisplays } = vp;
+  const touchRef = useRef(null);
+  const lastTapRef = useRef({ time: 0, itemId: null });
+  const longPressTimerRef = useRef(null);
+
+  const handleTouchStart = useCallback((e) => {
+    if (e.target.closest("[data-ui]")) return;
+    e.preventDefault();
+
+    if (e.touches.length === 2) {
+      if (touchRef.current?.type === "single") {
+        setDragging(null);
+        isPanningRef.current = false;
+      }
+      const t0 = e.touches[0], t1 = e.touches[1];
+      const midX = (t0.clientX + t1.clientX) / 2;
+      const midY = (t0.clientY + t1.clientY) / 2;
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      touchRef.current = {
+        type: "pinch",
+        startMidX: midX, startMidY: midY,
+        panStartX: panRef.current.x, panStartY: panRef.current.y,
+        startDist: dist, startZoom: zoomRef.current,
+      };
+      return;
+    }
+
+    if (e.touches.length === 1 && !touchRef.current?.type) {
+      const t = e.touches[0];
+      const target = document.elementFromPoint(t.clientX, t.clientY)?.closest("[data-item-id]");
+      const itemId = target?.dataset?.itemId || null;
+      touchRef.current = {
+        type: "single",
+        startX: t.clientX, startY: t.clientY,
+        moved: false,
+        itemId,
+        action: target?.dataset?.action || null,
+      };
+
+      // Start long-press timer to enter multi-select mode
+      if (isAdminRef.current && itemId && !target?.dataset?.action) {
+        longPressTimerRef.current = setTimeout(() => {
+          longPressTimerRef.current = null;
+          if (touchRef.current) touchRef.current.longPressFired = true;
+          setMultiSelectMode(true);
+          // Add the item and all its group members to selection
+          const pressedItem = itemsRef.current.find(i => i.id === itemId);
+          const groupIds = pressedItem?.groupId
+            ? itemsRef.current.filter(i => i.groupId === pressedItem.groupId).map(i => i.id)
+            : [itemId];
+          setSelectedIds(prev => {
+            const set = new Set(prev);
+            groupIds.forEach(id => set.add(id));
+            return [...set];
+          });
+          if (navigator.vibrate) navigator.vibrate(30);
+        }, 500);
+      }
+    }
+  }, []);
+
+  const handleTouchMove = useCallback((e) => {
+    if (!touchRef.current) return;
+    e.preventDefault();
+
+    if (touchRef.current.type === "pinch" && e.touches.length === 2) {
+      const t0 = e.touches[0], t1 = e.touches[1];
+      const midX = (t0.clientX + t1.clientX) / 2;
+      const midY = (t0.clientY + t1.clientY) / 2;
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      const { startMidX, startMidY, panStartX, panStartY, startDist, startZoom } = touchRef.current;
+
+      const factor = dist / startDist;
+      const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, startZoom * factor));
+      const r = nz / startZoom;
+
+      const newPanX = midX - startMidX + startMidX - r * (startMidX - panStartX);
+      const newPanY = midY - startMidY + startMidY - r * (startMidY - panStartY);
+      panRef.current = { x: newPanX, y: newPanY };
+      zoomRef.current = nz;
+      applyTransform();
+      updateDisplays();
+      return;
+    }
+
+    if (touchRef.current.type === "single" && e.touches.length === 1) {
+      const t = e.touches[0];
+      const dx = t.clientX - touchRef.current.startX;
+      const dy = t.clientY - touchRef.current.startY;
+
+      if (!touchRef.current.moved) {
+        if (Math.hypot(dx, dy) < TOUCH_TAP_THRESHOLD) return;
+        touchRef.current.moved = true;
+        // Cancel long-press since we're moving
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+
+        // Crossed threshold — start the appropriate gesture
+        const itemId = touchRef.current.itemId;
+        const action = touchRef.current.action;
+        const item = itemId ? itemsRef.current.find(i => i.id === itemId) : null;
+
+        if (item && isAdminRef.current) {
+          if (action === "resize") {
+            setSelectedIds([itemId]);
+            pushUndo(itemsRef.current);
+            touchRef.current.gesture = "resize";
+            touchRef.current.resizeHandle = document.elementFromPoint(touchRef.current.startX, touchRef.current.startY)?.closest("[data-handle]")?.dataset?.handle || "br";
+            touchRef.current.startItem = { ...item };
+          } else if (action === "rotate") {
+            setSelectedIds([itemId]);
+            pushUndo(itemsRef.current);
+            const rect = canvasRef.current.getBoundingClientRect();
+            const centerX = rect.left + (item.x + item.w / 2) * zoomRef.current + panRef.current.x;
+            const centerY = rect.top + (item.y + item.h / 2) * zoomRef.current + panRef.current.y;
+            touchRef.current.gesture = "rotate";
+            touchRef.current.rotateCenter = { x: centerX, y: centerY };
+            touchRef.current.startAngle = item.rotation || 0;
+            touchRef.current.startMouseAngle = Math.atan2(touchRef.current.startY - centerY, touchRef.current.startX - centerX) * 180 / Math.PI;
+          } else if (action === "move-ep1" || action === "move-ep2" || action === "move-elbow") {
+            setSelectedIds([itemId]);
+            pushUndo(itemsRef.current);
+            touchRef.current.gesture = "connector";
+            touchRef.current.connectorHandle = action.replace("move-", "");
+            touchRef.current.startItem = { ...item };
+          } else if (!action) {
+            // Drag item(s) — if touched item is already selected, drag all selected items
+            const alreadySelected = selectedIdsRef.current.includes(itemId);
+            const dragIds = alreadySelected
+              ? selectedIdsRef.current
+              : (item.groupId ? itemsRef.current.filter(i => i.groupId === item.groupId).map(i => i.id) : [itemId]);
+            if (!alreadySelected) setSelectedIds(dragIds);
+            pushUndo(itemsRef.current);
+            setDragging({
+              ids: dragIds,
+              startX: touchRef.current.startX, startY: touchRef.current.startY,
+              itemsStartMap: new Map(itemsRef.current.filter(i => dragIds.includes(i.id)).map(i => [i.id, {
+                id: i.id, x: i.x, y: i.y,
+                x1: i.x1, y1: i.y1, x2: i.x2, y2: i.y2,
+                elbowX: i.elbowX, elbowY: i.elbowY
+              }])),
+            });
+            touchRef.current.gesture = "drag";
+          } else {
+            // Unknown action — pan
+            isPanningRef.current = true;
+            panStartRef.current = { x: touchRef.current.startX - panRef.current.x, y: touchRef.current.startY - panRef.current.y };
+            touchRef.current.gesture = "pan";
+          }
+        } else {
+          // Not admin or no item — pan canvas
+          isPanningRef.current = true;
+          panStartRef.current = { x: touchRef.current.startX - panRef.current.x, y: touchRef.current.startY - panRef.current.y };
+          touchRef.current.gesture = "pan";
+        }
+      }
+
+      // Continue the gesture
+      const gesture = touchRef.current.gesture;
+      const es = effectiveSnapRef.current;
+      if (gesture === "pan") {
+        panRef.current = { x: t.clientX - panStartRef.current.x, y: t.clientY - panStartRef.current.y };
+        applyTransform();
+        updateDisplays();
+      } else if (gesture === "drag") {
+        const ddx = (t.clientX - touchRef.current.startX) / zoomRef.current;
+        const ddy = (t.clientY - touchRef.current.startY) / zoomRef.current;
+        setItems(p => p.map(i => {
+          const start = draggingRef.current?.itemsStartMap?.get(i.id);
+          if (!start) return i;
+          if (i.type === "connector") {
+            return { ...i,
+              x1: snap(start.x1 + ddx, es), y1: snap(start.y1 + ddy, es),
+              x2: snap(start.x2 + ddx, es), y2: snap(start.y2 + ddy, es),
+              elbowX: snap(start.elbowX + ddx, es), elbowY: snap(start.elbowY + ddy, es),
+            };
+          }
+          return { ...i, x: snap(start.x + ddx, es), y: snap(start.y + ddy, es) };
+        }));
+      } else if (gesture === "resize") {
+        const ddx = (t.clientX - touchRef.current.startX) / zoomRef.current;
+        const ddy = (t.clientY - touchRef.current.startY) / zoomRef.current;
+        const si = touchRef.current.startItem;
+        const handle = touchRef.current.resizeHandle || "br";
+        const r = computeResize(si, handle, ddx, ddy, es);
+        setItems(p => p.map(i => i.id === si.id ? { ...i, x: r.x, y: r.y, w: r.w, h: r.h } : i));
+      } else if (gesture === "rotate") {
+        const { x: cx, y: cy } = touchRef.current.rotateCenter;
+        const mouseAngle = Math.atan2(t.clientY - cy, t.clientX - cx) * 180 / Math.PI;
+        const deltaAngle = mouseAngle - touchRef.current.startMouseAngle;
+        const newAngle = snapAngle(touchRef.current.startAngle + deltaAngle, es);
+        const itemId = touchRef.current.itemId;
+        setItems(p => p.map(i => i.id === itemId ? { ...i, rotation: newAngle } : i));
+      } else if (gesture === "connector") {
+        const ddx = (t.clientX - touchRef.current.startX) / zoomRef.current;
+        const ddy = (t.clientY - touchRef.current.startY) / zoomRef.current;
+        const si = touchRef.current.startItem;
+        const handle = touchRef.current.connectorHandle;
+        setItems(p => p.map(i => {
+          if (i.id !== si.id) return i;
+          if (handle === "ep1") return { ...i, x1: snap(si.x1 + ddx, es), y1: snap(si.y1 + ddy, es) };
+          if (handle === "ep2") return { ...i, x2: snap(si.x2 + ddx, es), y2: snap(si.y2 + ddy, es) };
+          if (handle === "elbow") {
+            const newElbowX = snap(si.elbowX + ddx, es);
+            const newElbowY = snap(si.elbowY + ddy, es);
+            const midX = (i.x1 + i.x2) / 2;
+            const midY = (i.y1 + i.y2) / 2;
+            const hSpan = Math.abs(i.x2 - i.x1);
+            const vSpan = Math.abs(i.y2 - i.y1);
+            let orientation = i.orientation || "h";
+            if (orientation === "h") {
+              const distFromMidY = Math.abs(newElbowY - midY);
+              const distFromMidX = Math.abs(newElbowX - midX);
+              if (distFromMidY > vSpan * 0.35 + 20 && distFromMidY > distFromMidX) orientation = "v";
+            } else {
+              const distFromMidX = Math.abs(newElbowX - midX);
+              const distFromMidY = Math.abs(newElbowY - midY);
+              if (distFromMidX > hSpan * 0.35 + 20 && distFromMidX > distFromMidY) orientation = "h";
+            }
+            return { ...i, elbowX: newElbowX, elbowY: newElbowY, orientation };
+          }
+          return i;
+        }));
+      }
+    }
+  }, [applyTransform, updateDisplays]);
+
+  const handleTouchEnd = useCallback((e) => {
+    if (!touchRef.current) return;
+
+    // Always cancel any pending long-press
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+
+    if (touchRef.current.type === "pinch") {
+      if (e.touches.length < 2) {
+        updateDisplays();
+        touchRef.current = null;
+      }
+      return;
+    }
+
+    if (touchRef.current.type === "single" && e.touches.length === 0) {
+      const ref = touchRef.current;
+      touchRef.current = null;
+
+      if (ref.gesture === "drag") {
+        setDragging(null);
+        scheduleSave();
+        return;
+      }
+      if (ref.gesture === "pan") {
+        isPanningRef.current = false;
+        return;
+      }
+      if (ref.gesture === "resize" || ref.gesture === "rotate" || ref.gesture === "connector") {
+        scheduleSave();
+        return;
+      }
+
+      // No gesture started — this was a tap (or long-press that already fired)
+      if (!ref.moved && !ref.longPressFired) {
+        const itemId = ref.itemId;
+        const item = itemId ? itemsRef.current.find(i => i.id === itemId) : null;
+
+        if (item) {
+          if (!isAdminRef.current) {
+            // Viewer: activate links/teleports
+            if (item.type === "link") {
+              if (item.teleportPan) animateTo(item.teleportPan, item.teleportZoom ?? 1);
+              else if (item.url && item.url !== "https://") window.open(item.url, "_blank", "noopener");
+            }
+          } else {
+            if (multiSelectModeRef.current) {
+              // Multi-select mode: toggle this item's selection
+              setSelectedIds(prev => prev.includes(itemId) ? prev.filter(x => x !== itemId) : [...prev, itemId]);
+            } else {
+              // Normal mode: check for double-tap to edit text
+              const now = Date.now();
+              const last = lastTapRef.current;
+              if (last.itemId === itemId && now - last.time < 400 && (item.type === "text")) {
+                setEditingTextId(itemId);
+              } else {
+                // Select the item and all its group members (consistent with desktop)
+                const tapIds = item.groupId
+                  ? itemsRef.current.filter(i => i.groupId === item.groupId).map(i => i.id)
+                  : [itemId];
+                setSelectedIds(tapIds);
+              }
+              lastTapRef.current = { time: now, itemId };
+            }
+          }
+        } else {
+          // Tap on empty canvas — deselect and exit multi-select mode
+          setSelectedIds([]);
+          setEditingTextId(null);
+          if (multiSelectModeRef.current) setMultiSelectMode(false);
+        }
+      }
+    }
+  }, [scheduleSave]);
+
+  // Register touch listeners on canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+    canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
+    return () => {
+      canvas.removeEventListener("touchstart", handleTouchStart);
+      canvas.removeEventListener("touchmove", handleTouchMove);
+      canvas.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [loading, handleTouchStart, handleTouchMove, handleTouchEnd]);
+}
