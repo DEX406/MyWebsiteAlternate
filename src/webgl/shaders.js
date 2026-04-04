@@ -81,8 +81,8 @@ void main() {
   vec2 d = local - itemCenter;
   vec2 rotated = itemCenter + vec2(d.x * c - d.y * s, d.x * s + d.y * c);
 
-  // World position
-  vec2 world = (u_itemPos + u_padOffset) + rotated;
+  // World position — subtract padOffset so item content lands at u_itemPos
+  vec2 world = (u_itemPos - u_padOffset) + rotated;
 
   // Screen position
   vec2 screen = world * u_zoom + u_pan;
