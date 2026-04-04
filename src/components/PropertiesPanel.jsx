@@ -362,7 +362,18 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
                     <option value="25" style={{ background: "#1F1E1D" }}>25%</option>
                   </select>
                   {!isMulti && sel.originalSrc && sel.src !== sel.originalSrc && (
-                    <Toggle label="Revert" active onClick={() => updateItem(sel.id, { src: sel.originalSrc })} />
+                    <Toggle label="Revert" active onClick={() => updateItem(sel.id, {
+                      src: sel.originalSrc,
+                      // Restore original mipmaps, unprotect resized variants
+                      srcQ50: sel.originalSrcQ50 || null,
+                      srcQ25: sel.originalSrcQ25 || null,
+                      srcQ12: sel.originalSrcQ12 || null,
+                      srcQ6: sel.originalSrcQ6 || null,
+                      originalSrc: null,
+                      originalSrcQ50: null, originalSrcQ25: null,
+                      originalSrcQ12: null, originalSrcQ6: null,
+                      displaySrc: null, placeholderSrc: null, targetSrc: null,
+                    })} />
                   )}
                 </>
               )}

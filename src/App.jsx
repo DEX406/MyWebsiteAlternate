@@ -556,7 +556,18 @@ export default function App() {
     for (const item of list) {
       try {
         const { url } = await serverResize(item.src, scale);
-        updateItem(item.id, { src: url, originalSrc: item.originalSrc || item.src });
+        updateItem(item.id, {
+          src: url,
+          originalSrc: item.originalSrc || item.src,
+          // Stash old mipmaps so revert can restore them
+          originalSrcQ50: item.originalSrcQ50 || item.srcQ50 || null,
+          originalSrcQ25: item.originalSrcQ25 || item.srcQ25 || null,
+          originalSrcQ12: item.originalSrcQ12 || item.srcQ12 || null,
+          originalSrcQ6: item.originalSrcQ6 || item.srcQ6 || null,
+          // Clear mipmaps — new ones will auto-generate for resized src
+          srcQ50: null, srcQ25: null, srcQ12: null, srcQ6: null,
+          displaySrc: null, placeholderSrc: null, targetSrc: null,
+        });
         done++;
         setUploadStatus(`Resizing ${done}/${total}...`);
       } catch (err) {
