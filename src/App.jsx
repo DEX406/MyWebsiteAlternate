@@ -556,7 +556,16 @@ export default function App() {
     for (const item of list) {
       try {
         const { url } = await serverResize(item.src, scale);
-        updateItem(item.id, { src: url, originalSrc: item.originalSrc || item.src });
+        updateItem(item.id, {
+          src: url,
+          originalSrc: item.originalSrc || item.src,
+          srcQ50: null,
+          srcQ25: null,
+          srcQ12: null,
+          srcQ6: null,
+          naturalWidth: null,
+          naturalHeight: null,
+        });
         done++;
         setUploadStatus(`Resizing ${done}/${total}...`);
       } catch (err) {

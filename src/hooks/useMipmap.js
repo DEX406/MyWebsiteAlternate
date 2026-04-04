@@ -45,9 +45,13 @@ export function useMipmap(items, updateItem, vp) {
     const r2Images = eligible.filter(i => i.src.includes('r2.dev'));
 
     for (const item of r2Images) {
-      pendingGenerations.add(item.src);
-      generateMipmaps(item.src).then(result => {
-        pendingGenerations.delete(item.src);
+      const srcAtRequest = item.src;
+      pendingGenerations.add(srcAtRequest);
+      generateMipmaps(srcAtRequest).then(result => {
+        pendingGenerations.delete(srcAtRequest);
+        // Guard: only apply if the item's src hasn't changed (e.g. due to resize/undo)
+        const current = itemsRef.current.find(i => i.id === item.id);
+        if (!current || current.src !== srcAtRequest) return;
         if (result && (result.srcQ50 || result.srcQ25 || result.srcQ12 || result.srcQ6)) {
           updateItem(item.id, {
             srcQ50: result.srcQ50 || null,
@@ -57,7 +61,7 @@ export function useMipmap(items, updateItem, vp) {
           });
         }
       }).catch(() => {
-        pendingGenerations.delete(item.src);
+        pendingGenerations.delete(srcAtRequest);
       });
     }
   }, [items, updateItem]);
