@@ -61,29 +61,40 @@ export class TextRenderer {
     gl.bindVertexArray(null);
   }
 
-  // Called by GLRenderer for each text/link item.
-  draw(item, panX, panY, zoom, resW, resH) {
+  // Call once per frame before any draw() calls.
+  // Flushes atlas and caches per-frame values.
+  beginFrame(panX, panY, zoom, resW, resH) {
+    this.atlas.flush();
+    this._panX = panX;
+    this._panY = panY;
+    this._zoom = zoom;
+    this._resW = resW;
+    this._resH = resH;
+  }
+
+  // Called by GLRenderer for each text/link item (between beginFrame/endFrame).
+  draw(item) {
     if (!item.text) return;
 
     const layout = this._getLayout(item);
     if (!layout || layout.vertCount === 0) return;
 
-    this.atlas.flush();
-
     const gl = this.gl;
     gl.useProgram(this.prog);
     gl.bindVertexArray(this.vao);
 
-    gl.uniform2f(this.u.u_resolution, resW, resH);
-    gl.uniform2f(this.u.u_pan, panX, panY);
-    gl.uniform1f(this.u.u_zoom, zoom);
-    gl.uniform2f(this.u.u_offset, item.x, item.y);
-    gl.uniform1f(this.u.u_rotation, (item.rotation || 0) * Math.PI / 180);
-    gl.uniform2f(this.u.u_rotCenter, item.x + item.w * 0.5, item.y + item.h * 0.5);
-
+    // Frame-level uniforms (must re-set after quad shader runs in between)
+    gl.uniform2f(this.u.u_resolution, this._resW, this._resH);
+    gl.uniform2f(this.u.u_pan, this._panX, this._panY);
+    gl.uniform1f(this.u.u_zoom, this._zoom);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.atlas.texture);
     gl.uniform1i(this.u.u_atlas, 0);
+
+    // Per-item uniforms
+    gl.uniform2f(this.u.u_offset, item.x, item.y);
+    gl.uniform1f(this.u.u_rotation, (item.rotation || 0) * Math.PI / 180);
+    gl.uniform2f(this.u.u_rotCenter, item.x + item.w * 0.5, item.y + item.h * 0.5);
 
     const rgb = hexToRgb(item.color || '#C2C0B6');
     gl.uniform4f(this.u.u_color, rgb[0], rgb[1], rgb[2], 1.0);
@@ -91,8 +102,11 @@ export class TextRenderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
     gl.bufferData(gl.ARRAY_BUFFER, layout.verts, gl.DYNAMIC_DRAW);
     gl.drawArrays(gl.TRIANGLES, 0, layout.vertCount);
-
     gl.bindVertexArray(null);
+  }
+
+  endFrame() {
+    // no-op, kept for symmetry
   }
 
   // --- layout caching ---

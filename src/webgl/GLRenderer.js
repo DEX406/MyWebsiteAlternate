@@ -227,6 +227,9 @@ export class GLRenderer {
     const vpBottom = (cssH - panY) / zoom + marginY;
 
     // 3. Render items (culled)
+    // Prepare SDF text renderer once for the frame
+    this.textRenderer.beginFrame(panX * dpr, panY * dpr, zoom * dpr, cssW * dpr, cssH * dpr);
+
     const selSet = new Set(selectedIds || []);
     for (const item of sorted) {
       if (item.type === 'connector') {
@@ -241,6 +244,8 @@ export class GLRenderer {
         this._renderItem(item, panX * dpr, panY * dpr, zoom * dpr, cssW * dpr, cssH * dpr, globalShadow, editingTextId);
       }
     }
+
+    this.textRenderer.endFrame();
 
     // 4. Selection outlines (culled)
     for (const item of sorted) {
@@ -386,7 +391,7 @@ export class GLRenderer {
       gl.bindVertexArray(null);
       // Draw SDF text on top
       if (item.text) {
-        this.textRenderer.draw(item, panX, panY, zoom, resW, resH);
+        this.textRenderer.draw(item);
       }
       return;
     } else if (item.type === 'shape') {

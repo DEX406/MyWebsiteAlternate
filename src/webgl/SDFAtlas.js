@@ -22,7 +22,11 @@ export class SDFAtlas {
     this._atlasX = 0;
     this._atlasY = 0;
     this._rowH = 0;
-    this._dirty = false;
+    // Dirty region tracking for partial uploads
+    this._dirtyX0 = ATLAS_SIZE;
+    this._dirtyY0 = ATLAS_SIZE;
+    this._dirtyX1 = 0;
+    this._dirtyY1 = 0;
 
     // GPU atlas texture (R8)
     this.texture = gl.createTexture();
@@ -64,11 +68,27 @@ export class SDFAtlas {
   }
 
   flush() {
-    if (!this._dirty) return;
-    this._dirty = false;
+    if (this._dirtyX1 <= this._dirtyX0) return; // nothing dirty
     const gl = this.gl;
+    const x = this._dirtyX0, y = this._dirtyY0;
+    const w = this._dirtyX1 - x, h = this._dirtyY1 - y;
+
+    // Extract only the dirty sub-rectangle
+    const sub = new Uint8Array(w * h);
+    for (let row = 0; row < h; row++) {
+      const srcOff = (y + row) * ATLAS_SIZE + x;
+      sub.set(this._atlasData.subarray(srcOff, srcOff + w), row * w);
+    }
+
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, ATLAS_SIZE, ATLAS_SIZE, 0, gl.RED, gl.UNSIGNED_BYTE, this._atlasData);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, w, h, gl.RED, gl.UNSIGNED_BYTE, sub);
+
+    // Reset dirty region
+    this._dirtyX0 = ATLAS_SIZE;
+    this._dirtyY0 = ATLAS_SIZE;
+    this._dirtyX1 = 0;
+    this._dirtyY1 = 0;
   }
 
   _rasterize(char, fontFamily, bold, italic) {
@@ -142,9 +162,14 @@ export class SDFAtlas {
       bearingY, // in SDF_FONT_SIZE pixels
     };
 
+    // Expand dirty region
+    this._dirtyX0 = Math.min(this._dirtyX0, this._atlasX);
+    this._dirtyY0 = Math.min(this._dirtyY0, this._atlasY);
+    this._dirtyX1 = Math.max(this._dirtyX1, this._atlasX + sdfW);
+    this._dirtyY1 = Math.max(this._dirtyY1, this._atlasY + sdfH);
+
     this._atlasX += sdfW;
     this._rowH = Math.max(this._rowH, sdfH);
-    this._dirty = true;
 
     return glyph;
   }
