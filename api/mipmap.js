@@ -14,6 +14,9 @@ const VARIANTS = [
 // Formats we skip (GIF = animated, SVG = vector)
 const SKIP_EXTS = new Set(['gif', 'svg']);
 
+// Above this pixel count, use lossy webp to avoid OOM / timeouts on serverless
+const LOSSY_THRESHOLD = 4096 * 4096; // ~16.7 MP
+
 function variantKey(originalKey, suffix) {
   return originalKey.replace(/(\.[^.]+)$/, `${suffix}$1`);
 }
@@ -79,14 +82,16 @@ export default async function handler(req, res) {
     // Fetch the original image
     const obj = await r2.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
     const buffer = Buffer.from(await obj.Body.transformToByteArray());
-    const meta = await sharp(buffer).metadata();
+    const meta = await sharp(buffer, { limitInputPixels: 100_000_000 }).metadata();
+    const totalPixels = meta.width * meta.height;
+    const useLossy = totalPixels > LOSSY_THRESHOLD;
 
     // Generate missing variants
     for (const v of toGenerate) {
       const targetWidth = Math.max(1, Math.round(meta.width * v.scale));
-      const variantBuffer = await sharp(buffer)
+      const variantBuffer = await sharp(buffer, { limitInputPixels: 100_000_000 })
         .resize(targetWidth)
-        .webp({ lossless: true })
+        .webp(useLossy ? { quality: 80 } : { lossless: true })
         .toBuffer();
 
       const vKey = variantKey(key, v.suffix);

@@ -9,6 +9,7 @@ export class TextureCache {
     this.cache = new Map(); // url → { tex, width, height, ready, isPlaceholder, insertOrder }
     this.videos = new Map(); // itemId → { video, tex, needsUpdate }
     this.loading = new Set(); // urls currently loading
+    this.failed = new Set(); // urls that failed to load (don't retry)
     this.insertCounter = 0; // monotonic counter for FIFO ordering
     this._onTextureReady = onTextureReady || null; // callback when any texture finishes loading
     // 1x1 transparent fallback texture (used while images load)
@@ -67,6 +68,9 @@ export class TextureCache {
     const cached = this.cache.get(url);
     if (cached) return cached;
 
+    // Don't retry URLs that already failed (404, network error, etc.)
+    if (this.failed.has(url)) return this.transparent;
+
     // Start loading
     if (!this.loading.has(url)) {
       this.loading.add(url);
@@ -97,6 +101,7 @@ export class TextureCache {
       };
       img.onerror = () => {
         this.loading.delete(url);
+        this.failed.add(url);
       };
       img.src = url;
     }
