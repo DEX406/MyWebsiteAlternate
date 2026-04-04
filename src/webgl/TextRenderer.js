@@ -79,6 +79,9 @@ export class TextRenderer {
     const layout = this._getLayout(item);
     if (!layout || layout.vertCount === 0) return;
 
+    // Flush atlas if _buildLayout rasterized new glyphs
+    this.atlas.flush();
+
     const gl = this.gl;
     gl.useProgram(this.prog);
     gl.bindVertexArray(this.vao);

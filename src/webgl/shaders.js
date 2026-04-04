@@ -280,7 +280,7 @@ out vec4 outColor;
 
 void main() {
   float dist = texture(u_atlas, v_uv).r;
-  float smoothing = fwidth(dist) * 0.5;
+  float smoothing = max(fwidth(dist), 1.0 / 256.0) * 0.5;
   float alpha = smoothstep(0.5 - smoothing, 0.5 + smoothing, dist);
   if (alpha < 0.005) discard;
   outColor = vec4(u_color.rgb, u_color.a * alpha);

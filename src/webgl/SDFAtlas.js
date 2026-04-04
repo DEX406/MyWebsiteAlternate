@@ -3,7 +3,7 @@
 // distance transform, and packs results into a single-channel GPU texture atlas.
 
 export const SDF_FONT_SIZE = 48;
-export const SDF_BUFFER = 6;
+export const SDF_BUFFER = 8;   // must be >= SDF_RADIUS for full distance spread
 const SDF_RADIUS = 8;
 export const ATLAS_SIZE = 2048;
 const INF = 1e20;
@@ -116,20 +116,22 @@ export class SDFAtlas {
     const sdfW = contentW + buffer * 2;
     const sdfH = contentH + buffer * 2;
 
-    // Render glyph
+    // Render glyph: white on black avoids subpixel LCD rendering artifacts
     this._canvas.width = sdfW;
     this._canvas.height = sdfH;
     ctx.font = fontStr;
-    ctx.fillStyle = '#fff';
     ctx.textBaseline = 'alphabetic';
-    ctx.clearRect(0, 0, sdfW, sdfH);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, sdfW, sdfH);
+    ctx.fillStyle = '#fff';
     ctx.fillText(char, buffer + bearingX, buffer + bearingY);
 
-    // Extract alpha channel
+    // Extract luminance from green channel (immune to LCD subpixel fringing)
     const imgData = ctx.getImageData(0, 0, sdfW, sdfH);
     const len = sdfW * sdfH;
     const alpha = new Uint8Array(len);
-    for (let i = 0; i < len; i++) alpha[i] = imgData.data[i * 4 + 3];
+    for (let i = 0; i < len; i++) alpha[i] = imgData.data[i * 4 + 1];
 
     // Compute SDF
     const sdf = this._computeSDF(alpha, sdfW, sdfH);
