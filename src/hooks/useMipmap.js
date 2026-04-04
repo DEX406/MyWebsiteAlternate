@@ -123,12 +123,14 @@ function pickTier(item, zoom, isOnscreen) {
   }
 
   // On-screen: DPI-aware selection
-  // Use the larger dimension so tall-but-narrow (or wide-but-short) images
-  // still get a high-res tier based on whichever axis demands the most pixels.
-  const renderedSize = Math.max(item.w, item.h) * zoom;
-
+  // The frame crops the image with object-fit:cover, so the image may be
+  // larger than the frame. Compute the actual image size as rendered (before
+  // cropping) so mipmap selection reflects the true displayed resolution.
   const natW = item.naturalWidth || item.w;
   const natH = item.naturalHeight || item.h;
+  const coverScale = Math.max(item.w / natW, item.h / natH);
+  const renderedSize = Math.max(natW, natH) * coverScale * zoom;
+
   const natSize = Math.max(natW, natH);
 
   const q6Size = natSize * 0.0625;
