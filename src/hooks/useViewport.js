@@ -11,10 +11,8 @@ export function useViewport() {
   const homeViewRef = useRef(null);
 
   const canvasRef = useRef(null);
-  const canvasContentRef = useRef(null);
   const canvasHandlesRef = useRef(null);
-  const bgCanvasRef = useRef(null);
-  const drawBgRef = useRef(null);
+  const drawBgRef = useRef(null);  // triggers WebGL render
 
   const posDisplayRef = useRef(null);
   const zoomDisplayRef = useRef(null);
@@ -27,11 +25,7 @@ export function useViewport() {
     if (settledTimerRef.current) clearTimeout(settledTimerRef.current);
     settledTimerRef.current = setTimeout(() => {
       interactingRef.current = false;
-      // Only drop compositor layer promotion above 100% zoom — forces
-      // re-rasterization so images stay crisp. At ≤100% the 1x raster
-      // is already sufficient, so keep the layer promoted to avoid churn.
       if (zoomRef.current > 1) {
-        if (canvasContentRef.current) canvasContentRef.current.style.willChange = '';
         if (canvasHandlesRef.current) canvasHandlesRef.current.style.willChange = '';
       }
       if (onSettledRef.current) onSettledRef.current();
@@ -49,11 +43,8 @@ export function useViewport() {
     const z = zoomRef.current;
     if (!interactingRef.current) {
       interactingRef.current = true;
-      if (canvasContentRef.current) canvasContentRef.current.style.willChange = 'transform';
       if (canvasHandlesRef.current) canvasHandlesRef.current.style.willChange = 'transform';
     }
-    if (canvasContentRef.current)
-      canvasContentRef.current.style.transform = `translate(${x}px,${y}px) scale(${z})`;
     if (canvasHandlesRef.current)
       canvasHandlesRef.current.style.transform = `translate(${x}px,${y}px) scale(${z})`;
     if (drawBgRef.current) drawBgRef.current();
@@ -169,7 +160,7 @@ export function useViewport() {
 
   return {
     panRef, zoomRef, isPanningRef, panStartRef, homeViewRef,
-    canvasRef, canvasContentRef, canvasHandlesRef, bgCanvasRef, drawBgRef,
+    canvasRef, canvasHandlesRef, drawBgRef,
     posDisplayRef, zoomDisplayRef,
     applyTransform, updateDisplays, viewCenter, zoomTo, animateTo, goHome, setHome,
     getViewportBounds, onSettledRef,

@@ -1,0 +1,159 @@
+// Texture cache: loads images from URLs into WebGL textures, manages video textures
+
+export class TextureCache {
+  constructor(gl) {
+    this.gl = gl;
+    this.cache = new Map(); // url → { tex, width, height, ready }
+    this.videos = new Map(); // itemId → { video, tex, needsUpdate }
+    this.loading = new Set(); // urls currently loading
+    // 1x1 white fallback texture
+    this.fallback = this._create1x1([255, 255, 255, 255]);
+    // 1x1 transparent fallback
+    this.transparent = this._create1x1([0, 0, 0, 0]);
+  }
+
+  _create1x1(rgba) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(rgba));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    return { tex, width: 1, height: 1, ready: true };
+  }
+
+  // Get texture for an image URL. Returns { tex, width, height, ready }.
+  // Starts async load if not cached. Returns fallback until ready.
+  get(url, pixelated = false) {
+    if (!url) return this.transparent;
+
+    const cached = this.cache.get(url);
+    if (cached) return cached;
+
+    // Start loading
+    if (!this.loading.has(url)) {
+      this.loading.add(url);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        this.loading.delete(url);
+        const gl = this.gl;
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+        // Generate mipmaps for non-pixelated images
+        if (!pixelated) {
+          gl.generateMipmap(gl.TEXTURE_2D);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        } else {
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        }
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, pixelated ? gl.NEAREST : gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        this.cache.set(url, { tex, width: img.naturalWidth, height: img.naturalHeight, ready: true });
+      };
+      img.onerror = () => {
+        this.loading.delete(url);
+      };
+      img.src = url;
+    }
+
+    return this.fallback;
+  }
+
+  // Get or create a video texture for a video item.
+  // Returns { tex, video, width, height, ready }.
+  getVideo(itemId, src) {
+    let entry = this.videos.get(itemId);
+    if (entry && entry.src === src) {
+      // Update texture from video frame if playing
+      if (entry.video.readyState >= 2) {
+        const gl = this.gl;
+        gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, entry.video);
+        entry.ready = true;
+        entry.width = entry.video.videoWidth;
+        entry.height = entry.video.videoHeight;
+      }
+      return entry;
+    }
+
+    // Clean up old video
+    if (entry) {
+      entry.video.pause();
+      entry.video.src = '';
+      this.gl.deleteTexture(entry.tex);
+    }
+
+    // Create new video element
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.autoplay = true;
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.src = src;
+    video.play().catch(() => {});
+
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    const newEntry = { video, tex, src, width: 1, height: 1, ready: false };
+    this.videos.set(itemId, newEntry);
+    return newEntry;
+  }
+
+  // Remove video textures for items that no longer exist
+  pruneVideos(activeIds) {
+    const activeSet = new Set(activeIds);
+    for (const [id, entry] of this.videos) {
+      if (!activeSet.has(id)) {
+        entry.video.pause();
+        entry.video.src = '';
+        this.gl.deleteTexture(entry.tex);
+        this.videos.delete(id);
+      }
+    }
+  }
+
+  // Compute UV crop rect for object-fit: cover
+  coverUV(texW, texH, itemW, itemH) {
+    if (!texW || !texH || !itemW || !itemH) return [0, 0, 1, 1];
+    const texAspect = texW / texH;
+    const itemAspect = itemW / itemH;
+    if (texAspect > itemAspect) {
+      // Texture wider than item: crop sides
+      const scale = itemAspect / texAspect;
+      const offset = (1 - scale) / 2;
+      return [offset, 0, scale, 1];
+    } else {
+      // Texture taller: crop top/bottom
+      const scale = texAspect / itemAspect;
+      const offset = (1 - scale) / 2;
+      return [0, offset, 1, scale];
+    }
+  }
+
+  destroy() {
+    const gl = this.gl;
+    for (const entry of this.cache.values()) {
+      gl.deleteTexture(entry.tex);
+    }
+    for (const entry of this.videos.values()) {
+      entry.video.pause();
+      entry.video.src = '';
+      gl.deleteTexture(entry.tex);
+    }
+    gl.deleteTexture(this.fallback.tex);
+    gl.deleteTexture(this.transparent.tex);
+    this.cache.clear();
+    this.videos.clear();
+  }
+}
