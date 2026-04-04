@@ -544,15 +544,6 @@ export default function App() {
     setUploadStatus("Cleaning up...");
     try {
       const result = await cleanupFiles(items);
-      // Originals are gone after cleanup — clear revert state so next resize
-      // sets a fresh baseline and revert doesn't point to deleted files
-      if (result.deleted > 0) {
-        setItemsAndSave(prev => prev.map(item =>
-          item.originalSrc
-            ? { ...item, originalSrc: null, originalSrcQ50: null, originalSrcQ25: null, originalSrcQ12: null, originalSrcQ6: null }
-            : item
-        ));
-      }
       setUploadStatus(`Cleaned ${result.deleted || 0} files`);
     }
     catch { setUploadStatus("Cleanup failed"); }
@@ -570,12 +561,6 @@ export default function App() {
         const { url } = await serverResize(item.src, scale);
         updateItem(item.id, {
           src: url,
-          originalSrc: item.originalSrc || item.src,
-          // Stash old mipmaps so revert can restore them
-          originalSrcQ50: item.originalSrcQ50 || item.srcQ50 || null,
-          originalSrcQ25: item.originalSrcQ25 || item.srcQ25 || null,
-          originalSrcQ12: item.originalSrcQ12 || item.srcQ12 || null,
-          originalSrcQ6: item.originalSrcQ6 || item.srcQ6 || null,
           // Clear mipmaps — new ones will auto-generate for resized src
           srcQ50: null, srcQ25: null, srcQ12: null, srcQ6: null,
           displaySrc: null, placeholderSrc: null, targetSrc: null,

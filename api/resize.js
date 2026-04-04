@@ -1,10 +1,7 @@
 import sharp from 'sharp';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { kv } from '@vercel/kv';
 import { verifyAuth } from './_auth.js';
 import { r2, BUCKET, R2_PUBLIC_URL } from './_r2.js';
-
-const KV_RESIZE_ORIGINALS = 'resize-originals-v1';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -67,18 +64,6 @@ export default async function handler(req, res) {
       Body: buffer,
       ContentType: contentType,
     }));
-
-    // Track original for 1-hour cleanup (so undo/revert can use it)
-    if (sourceUrl.startsWith(r2Prefix) && scale < 1) {
-      const originalKey = sourceUrl.slice(r2Prefix.length);
-      try {
-        const originals = (await kv.get(KV_RESIZE_ORIGINALS)) || [];
-        originals.push({ key: originalKey, timestamp: Date.now() });
-        await kv.set(KV_RESIZE_ORIGINALS, originals);
-      } catch (e) {
-        console.error('Failed to track resize original:', e.message);
-      }
-    }
 
     return res.status(200).json({ url: `${R2_PUBLIC_URL}/${outKey}` });
   } catch (err) {

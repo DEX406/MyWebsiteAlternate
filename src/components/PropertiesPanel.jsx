@@ -338,7 +338,7 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
                   setUploadStatus("Storing...");
                   try {
                     const result = await serverResize(sel.src, 1);
-                    updateItem(sel.id, { src: result.url, originalSrc: sel.src });
+                    updateItem(sel.id, { src: result.url });
                     setUploadStatus("Stored in R2");
                   } catch (err) { setUploadStatus(err.message || "Failed to store"); }
                   setTimeout(() => setUploadStatus(""), 3000);
@@ -361,20 +361,6 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
                     <option value="50" style={{ background: "#1F1E1D" }}>50%</option>
                     <option value="25" style={{ background: "#1F1E1D" }}>25%</option>
                   </select>
-                  {!isMulti && sel.originalSrc && sel.src !== sel.originalSrc && (
-                    <Toggle label="Revert" active onClick={() => updateItem(sel.id, {
-                      src: sel.originalSrc,
-                      // Restore original mipmaps, unprotect resized variants
-                      srcQ50: sel.originalSrcQ50 || null,
-                      srcQ25: sel.originalSrcQ25 || null,
-                      srcQ12: sel.originalSrcQ12 || null,
-                      srcQ6: sel.originalSrcQ6 || null,
-                      originalSrc: null,
-                      originalSrcQ50: null, originalSrcQ25: null,
-                      originalSrcQ12: null, originalSrcQ6: null,
-                      displaySrc: null, placeholderSrc: null, targetSrc: null,
-                    })} />
-                  )}
                 </>
               )}
             </div>
