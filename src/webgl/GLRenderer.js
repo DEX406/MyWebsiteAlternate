@@ -214,20 +214,35 @@ export class GLRenderer {
     // 2. Sort items by z
     const sorted = [...items].sort((a, b) => a.z - b.z);
 
-    // 3. Render items
+    // Viewport culling: compute world-space bounds with 25% margin
+    const marginX = cssW * 0.25 / zoom;
+    const marginY = cssH * 0.25 / zoom;
+    const vpLeft = -panX / zoom - marginX;
+    const vpTop = -panY / zoom - marginY;
+    const vpRight = (cssW - panX) / zoom + marginX;
+    const vpBottom = (cssH - panY) / zoom + marginY;
+
+    // 3. Render items (culled)
     const selSet = new Set(selectedIds || []);
     for (const item of sorted) {
       if (item.type === 'connector') {
+        const cLeft = Math.min(item.x1, item.x2);
+        const cTop = Math.min(item.y1, item.y2);
+        const cRight = Math.max(item.x1, item.x2);
+        const cBottom = Math.max(item.y1, item.y2);
+        if (cRight < vpLeft || cLeft > vpRight || cBottom < vpTop || cTop > vpBottom) continue;
         this._renderConnector(item, panX * dpr, panY * dpr, zoom * dpr, cssW * dpr, cssH * dpr);
       } else {
+        if (item.x + item.w < vpLeft || item.x > vpRight || item.y + item.h < vpTop || item.y > vpBottom) continue;
         this._renderItem(item, panX * dpr, panY * dpr, zoom * dpr, cssW * dpr, cssH * dpr, globalShadow, editingTextId);
       }
     }
 
-    // 4. Selection outlines
+    // 4. Selection outlines (culled)
     for (const item of sorted) {
       if (!selSet.has(item.id)) continue;
       if (item.type === 'connector') continue; // connector selection handled by DOM handles
+      if (item.x + item.w < vpLeft || item.x > vpRight || item.y + item.h < vpTop || item.y > vpBottom) continue;
       this._renderSelectionOutline(item, panX * dpr, panY * dpr, zoom * dpr, cssW * dpr, cssH * dpr);
     }
 
