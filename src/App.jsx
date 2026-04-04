@@ -205,7 +205,8 @@ export default function App() {
   // ── Item CRUD ──
   const maxZ = (arr) => { const a = arr || items; return a.length ? Math.max(...a.map(i => i.z)) : 0; };
   const updateItem = (id, updates) => setItemsAndSave(p => p.map(i => i.id === id ? { ...i, ...updates } : i));
-  // Mipmap updater: displaySrc changes are silent (no save), but srcQ50/srcQ25/srcQ12/srcQ6 trigger a save
+  // Mipmap updater: displaySrc/placeholderSrc/targetSrc changes are silent (no save),
+  // but srcQ50/srcQ25/srcQ12/srcQ6 trigger a save
   const updateItemMipmap = useCallback((id, updates) => {
     const hasMipmapUrls = updates.srcQ50 !== undefined || updates.srcQ25 !== undefined || updates.srcQ12 !== undefined || updates.srcQ6 !== undefined;
     if (hasMipmapUrls) {
@@ -213,7 +214,7 @@ export default function App() {
       setItems(p => p.map(i => i.id === id ? { ...i, ...updates } : i));
       scheduleSave();
     } else {
-      // displaySrc changes — ephemeral, no save needed
+      // displaySrc/placeholderSrc/targetSrc changes — ephemeral, no save needed
       setItems(p => p.map(i => i.id === id ? { ...i, ...updates } : i));
     }
   }, [scheduleSave]);

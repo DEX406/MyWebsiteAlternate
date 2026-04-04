@@ -76,13 +76,13 @@ void main() {
   v_localPx = local;
 
   // Rotate around item center (not pad center)
-  vec2 itemCenter = -u_padOffset + u_itemSize * 0.5;
+  vec2 itemCenter = u_padOffset + u_itemSize * 0.5;
   float c = cos(u_rotation), s = sin(u_rotation);
   vec2 d = local - itemCenter;
   vec2 rotated = itemCenter + vec2(d.x * c - d.y * s, d.x * s + d.y * c);
 
-  // World position
-  vec2 world = (u_itemPos + u_padOffset) + rotated;
+  // World position — subtract padOffset so item content lands at u_itemPos
+  vec2 world = (u_itemPos - u_padOffset) + rotated;
 
   // Screen position
   vec2 screen = world * u_zoom + u_pan;

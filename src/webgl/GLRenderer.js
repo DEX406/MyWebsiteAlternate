@@ -317,8 +317,19 @@ export class GLRenderer {
 
     // Content
     if (item.type === 'image') {
-      const src = item.displaySrc || item.src;
-      const entry = this.texCache.get(src, item.pixelated);
+      // Build candidate list: prefer targetSrc, fall back to placeholder, then original.
+      // getBestReady kicks off loading for all but only returns the first that's ready.
+      const candidates = [
+        item.targetSrc || item.displaySrc,
+        item.placeholderSrc,
+        item.src,
+      ].filter(Boolean);
+      // Deduplicate while preserving order
+      const seen = new Set();
+      const unique = [];
+      for (const c of candidates) { if (!seen.has(c)) { seen.add(c); unique.push(c); } }
+      const best = this.texCache.getBestReady(unique, item.pixelated);
+      const entry = best.entry;
       gl.uniform1i(u.u_textured, 1);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, entry.tex);

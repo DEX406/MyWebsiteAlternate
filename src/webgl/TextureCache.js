@@ -1,11 +1,15 @@
 // Texture cache: loads images from URLs into WebGL textures, manages video textures
+// Supports FIFO eviction with placeholder protection — low-res placeholders are evicted last.
+
+const MAX_TEXTURES = 200; // max cached textures before eviction kicks in
 
 export class TextureCache {
   constructor(gl) {
     this.gl = gl;
-    this.cache = new Map(); // url → { tex, width, height, ready }
+    this.cache = new Map(); // url → { tex, width, height, ready, isPlaceholder, insertOrder }
     this.videos = new Map(); // itemId → { video, tex, needsUpdate }
     this.loading = new Set(); // urls currently loading
+    this.insertCounter = 0; // monotonic counter for FIFO ordering
     // 1x1 white fallback texture
     this.fallback = this._create1x1([255, 255, 255, 255]);
     // 1x1 transparent fallback
@@ -22,9 +26,41 @@ export class TextureCache {
     return { tex, width: 1, height: 1, ready: true };
   }
 
+  // Check if a URL's texture is loaded and ready to render
+  isReady(url) {
+    if (!url) return false;
+    const entry = this.cache.get(url);
+    return !!(entry && entry.ready);
+  }
+
+  // Evict oldest non-placeholder textures first, then oldest placeholders, via FIFO
+  _evict() {
+    if (this.cache.size <= MAX_TEXTURES) return;
+
+    // Collect entries sorted by insertOrder (FIFO)
+    const entries = [...this.cache.entries()]
+      .map(([url, entry]) => ({ url, ...entry }))
+      .sort((a, b) => a.insertOrder - b.insertOrder);
+
+    // Split into non-placeholder and placeholder
+    const nonPlaceholders = entries.filter(e => !e.isPlaceholder);
+    const placeholders = entries.filter(e => e.isPlaceholder);
+
+    // Evict non-placeholders first (FIFO), then placeholders if needed
+    const evictOrder = [...nonPlaceholders, ...placeholders];
+    const toEvict = this.cache.size - MAX_TEXTURES;
+
+    for (let i = 0; i < toEvict && i < evictOrder.length; i++) {
+      const e = evictOrder[i];
+      this.gl.deleteTexture(e.tex);
+      this.cache.delete(e.url);
+    }
+  }
+
   // Get texture for an image URL. Returns { tex, width, height, ready }.
   // Starts async load if not cached. Returns fallback until ready.
-  get(url, pixelated = false) {
+  // isPlaceholder: mark this entry as a low-res placeholder (evicted last)
+  get(url, pixelated = false, isPlaceholder = false) {
     if (!url) return this.transparent;
 
     const cached = this.cache.get(url);
@@ -51,7 +87,11 @@ export class TextureCache {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, pixelated ? gl.NEAREST : gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        this.cache.set(url, { tex, width: img.naturalWidth, height: img.naturalHeight, ready: true });
+        this.cache.set(url, {
+          tex, width: img.naturalWidth, height: img.naturalHeight,
+          ready: true, isPlaceholder, insertOrder: this.insertCounter++,
+        });
+        this._evict();
       };
       img.onerror = () => {
         this.loading.delete(url);
@@ -60,6 +100,29 @@ export class TextureCache {
     }
 
     return this.fallback;
+  }
+
+  // Get the best available texture from a prioritized list of URLs.
+  // Kicks off loading for all URLs but only returns the first one that's ready.
+  // Returns { entry, url } of the best ready texture, or fallback.
+  getBestReady(candidates, pixelated = false) {
+    let bestEntry = null;
+    let bestUrl = null;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const url = candidates[i];
+      if (!url) continue;
+      const isPlaceholder = i === candidates.length - 1; // last candidate = lowest res = placeholder
+      const entry = this.get(url, pixelated, isPlaceholder);
+      if (!bestEntry && entry.ready && entry !== this.fallback && entry !== this.transparent) {
+        bestEntry = entry;
+        bestUrl = url;
+      }
+    }
+
+    return bestEntry
+      ? { entry: bestEntry, url: bestUrl }
+      : { entry: this.fallback, url: null };
   }
 
   // Get or create a video texture for a video item.
