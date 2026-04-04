@@ -12,6 +12,7 @@ export function useTouchInput({
   effectiveSnapRef,
   scheduleSave, animateTo, pushUndo,
   multiSelectModeRef, setMultiSelectMode,
+  doHitTest,
 }) {
   const { panRef, zoomRef, isPanningRef, panStartRef, canvasRef, applyTransform, updateDisplays } = vp;
   const touchRef = useRef(null);
@@ -42,14 +43,23 @@ export function useTouchInput({
 
     if (e.touches.length === 1 && !touchRef.current?.type) {
       const t = e.touches[0];
+      // Try DOM hit first (for handles), then WebGL hit test
       const target = document.elementFromPoint(t.clientX, t.clientY)?.closest("[data-item-id]");
-      const itemId = target?.dataset?.itemId || null;
+      let itemId = target?.dataset?.itemId || null;
+      let action = target?.dataset?.action || null;
+      if (!itemId && doHitTest) {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (rect) {
+          const hit = doHitTest(t.clientX - rect.left, t.clientY - rect.top, itemsRef.current, panRef.current.x, panRef.current.y, zoomRef.current);
+          if (hit) { itemId = hit.id; action = hit.action; }
+        }
+      }
       touchRef.current = {
         type: "single",
         startX: t.clientX, startY: t.clientY,
         moved: false,
         itemId,
-        action: target?.dataset?.action || null,
+        action,
       };
 
       // Start long-press timer to enter multi-select mode

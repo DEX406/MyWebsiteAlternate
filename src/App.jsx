@@ -2,7 +2,6 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { ZoomInIcon, ZoomOutIcon, GridIcon, HomeIcon, FloppyIcon, UndoIcon, RedoIcon, CopyIcon, PasteIcon, TrashIcon, GroupIcon, UngroupIcon, BringFrontIcon, SendBackIcon } from './icons.jsx';
 
 import { FONT, FONTS, DEFAULT_BG_GRID } from './constants.js';
-import { drawGrid } from './drawGrid.js';
 import { uid, snap } from './utils.js';
 import { createBackupZip, restoreFromZip } from './backupRestore.js';
 import { serverResize } from './imageUtils.js';
@@ -20,6 +19,7 @@ import { usePointerInput } from './hooks/usePointerInput.js';
 import { useTouchInput } from './hooks/useTouchInput.js';
 import { useUndo } from './hooks/useUndo.js';
 import { useMipmap } from './hooks/useMipmap.js';
+import { useWebGLCanvas } from './hooks/useWebGLCanvas.js';
 
 const DEFAULT_PALETTE = ["#C2C0B6", "#30302E", "#262624", "#141413", "#FE8181", "#D97757", "#65BB30", "#2C84DB", "#9B87F5"];
 const COLOR_PROPS = ["color", "bgColor", "borderColor", "lineColor", "dotColor"];
@@ -67,39 +67,42 @@ export default function App() {
   const rotatingRef = useRef(rotating); rotatingRef.current = rotating;
   const editingConnectorRef = useRef(editingConnector); editingConnectorRef.current = editingConnector;
   const multiSelectModeRef = useRef(multiSelectMode); multiSelectModeRef.current = multiSelectMode;
+  const globalShadowRef = useRef(globalShadow); globalShadowRef.current = globalShadow;
+  const editingTextIdRef = useRef(editingTextId); editingTextIdRef.current = editingTextId;
 
   const effectiveSnap = snapOn || shiftHeld;
   const effectiveSnapRef = useRef(effectiveSnap); effectiveSnapRef.current = effectiveSnap;
 
   // ── Viewport ──
   const vp = useViewport();
-  const { canvasRef, canvasContentRef, canvasHandlesRef, bgCanvasRef, drawBgRef, posDisplayRef, zoomDisplayRef, applyTransform, updateDisplays, viewCenter, zoomTo, animateTo, goHome, setHome } = vp;
+  const { canvasRef, canvasHandlesRef, drawBgRef, posDisplayRef, zoomDisplayRef, applyTransform, updateDisplays, viewCenter, zoomTo, animateTo, goHome, setHome } = vp;
 
-  // Wire up procedural grid background drawing
+  // ── WebGL renderer ──
+  const webgl = useWebGLCanvas();
+
+  // Wire up WebGL render trigger — called on every viewport change (pan/zoom/resize)
   useEffect(() => {
     drawBgRef.current = () => {
-      const canvas = bgCanvasRef.current;
-      if (!canvas) return;
-      const z = vp.zoomRef.current;
-      const enabled = bgGridRef.current.enabled;
-      // Fade: full opacity at zoom≥100%, linear fade to 0 at zoom=50%, hidden below
-      const fade = z >= 1 ? 1 : z <= 0.5 ? 0 : (z - 0.5) / 0.5;
-      const visible = enabled && fade > 0;
-      canvas.style.display = visible ? "" : "none";
-      if (visible) {
-        canvas.style.opacity = fade;
-        drawGrid(canvas, vp.panRef.current.x, vp.panRef.current.y, z, bgGridRef.current);
-      }
+      webgl.renderSync({
+        items: itemsRef.current,
+        panX: vp.panRef.current.x,
+        panY: vp.panRef.current.y,
+        zoom: vp.zoomRef.current,
+        bgGrid: bgGridRef.current,
+        globalShadow: globalShadowRef.current,
+        selectedIds: selectedIdsRef.current,
+        editingTextId: editingTextIdRef.current,
+      });
     };
     drawBgRef.current();
   }, []);
 
-  // Redraw when bgGrid settings change
+  // Re-render when state changes that affect WebGL output
   useEffect(() => {
     if (drawBgRef.current) drawBgRef.current();
-  }, [bgGrid]);
+  }, [bgGrid, items, selectedIds, globalShadow, editingTextId]);
 
-  // Redraw when the viewport container resizes (window resize, mobile chrome, etc.)
+  // Re-render on viewport container resize
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
@@ -107,6 +110,20 @@ export default function App() {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Continuous render for video items (need to update video textures each frame)
+  useEffect(() => {
+    const hasVideo = items.some(i => i.type === 'video');
+    if (!hasVideo) return;
+    let running = true;
+    const loop = () => {
+      if (!running) return;
+      if (drawBgRef.current) drawBgRef.current();
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+    return () => { running = false; };
+  }, [items]);
 
   // ── Load board on mount ──
   useEffect(() => {
@@ -275,6 +292,7 @@ export default function App() {
     draggingRef, setDragging, resizingRef, setResizing,
     rotatingRef, setRotating, editingConnectorRef, setEditingConnector,
     setEditingTextId, effectiveSnapRef, scheduleSave, animateTo, pushUndo,
+    doHitTest: webgl.doHitTest,
   });
 
   useTouchInput({
@@ -283,6 +301,7 @@ export default function App() {
     setDragging, draggingRef, effectiveSnapRef,
     scheduleSave, animateTo, pushUndo,
     multiSelectModeRef, setMultiSelectMode,
+    doHitTest: webgl.doHitTest,
   });
 
   useKeyboard({
@@ -591,11 +610,41 @@ export default function App() {
       <div ref={canvasRef} onPointerDown={handlePointerDown}
         style={{ width: "100%", height: "100%", cursor: dragging ? "move" : rotating ? "grabbing" : "grab", position: "relative", overflow: "hidden", touchAction: "none", zIndex: Z.CANVAS, isolation: "isolate" }}>
 
-        <canvas ref={bgCanvasRef} style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", pointerEvents: "none" }} />
+        {/* WebGL canvas — renders grid + all content items */}
+        <canvas ref={webgl.setCanvasRef} style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
 
-        <div ref={canvasContentRef} style={{ transform: `translate(${vp.panRef.current.x}px,${vp.panRef.current.y}px) scale(${vp.zoomRef.current})`, transformOrigin: "0 0", position: "absolute", top: 0, left: 0, zIndex: Z.CONTENT }}>
-          {sortedItems.map(item => <CanvasItem key={item.id} item={item} renderHandles={false} selectedIds={selectedIds} isAdmin={isAdmin} editingTextId={editingTextId} globalShadow={globalShadow} deleteItems={deleteItems} updateItem={updateItem} setEditingTextId={setEditingTextId} />)}
-        </div>
+        {/* Text editing overlay — positioned over the text item being edited */}
+        {editingTextId && (() => {
+          const item = items.find(i => i.id === editingTextId);
+          if (!item || (item.type !== 'text' && item.type !== 'link')) return null;
+          const z = vp.zoomRef.current;
+          const px = item.x * z + vp.panRef.current.x;
+          const py = item.y * z + vp.panRef.current.y;
+          const sw = item.w * z;
+          const sh = item.h * z;
+          const applyBg = (!item.bgColor || item.bgColor === 'transparent' || (item.bgOpacity ?? 1) <= 0)
+            ? 'rgba(194,192,182,0.05)' : (item.bgOpacity ?? 1) >= 1 ? item.bgColor
+            : `rgba(${parseInt(item.bgColor.slice(1,3),16)},${parseInt(item.bgColor.slice(3,5),16)},${parseInt(item.bgColor.slice(5,7),16)},${item.bgOpacity})`;
+          return (
+            <textarea data-ui autoFocus value={item.text}
+              onFocus={() => { if (item.placeholder) updateItem(item.id, { text: "", placeholder: false }); }}
+              onChange={e => updateItem(item.id, { text: e.target.value })}
+              onBlur={() => setEditingTextId(null)}
+              onPointerDown={e => e.stopPropagation()}
+              onTouchStart={e => e.stopPropagation()}
+              style={{
+                position: "absolute", left: px, top: py, width: sw, height: sh,
+                transform: `rotate(${item.rotation || 0}deg)`, transformOrigin: "0 0",
+                resize: "none", border: "none", outline: "2px solid rgba(44,132,219,0.7)",
+                touchAction: "auto", background: applyBg,
+                color: item.color, fontSize: (item.fontSize || 24) * z,
+                fontFamily: item.fontFamily || "'DM Sans', sans-serif",
+                fontWeight: item.bold ? "bold" : "normal", fontStyle: item.italic ? "italic" : "normal",
+                textAlign: item.align || "left", padding: `${8*z}px ${12*z}px`, boxSizing: "border-box",
+                zIndex: Z.HANDLES + 1,
+              }} />
+          );
+        })()}
 
         {isAdmin && (
           <div style={{ position: "absolute", top: 0, left: 0, zIndex: Z.HANDLES, pointerEvents: "none" }}>

@@ -12,6 +12,7 @@ export function usePointerInput({
   setEditingTextId,
   effectiveSnapRef,
   scheduleSave, animateTo, pushUndo,
+  doHitTest,
 }) {
   const { panRef, zoomRef, isPanningRef, panStartRef, canvasRef, applyTransform, updateDisplays } = vp;
 
@@ -20,9 +21,19 @@ export function usePointerInput({
     if (e.button === 1) { e.preventDefault(); isPanningRef.current = true; panStartRef.current = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y }; if (canvasRef.current) canvasRef.current.style.cursor = "grabbing"; return; }
     if (e.button !== 0) return;
 
+    // Try DOM-based hit test first (for handle overlays)
     const target = e.target.closest("[data-item-id]");
-    const action = target?.dataset?.action;
-    const id = target?.dataset?.itemId;
+    let action = target?.dataset?.action;
+    let id = target?.dataset?.itemId;
+
+    // If no DOM hit, try WebGL hit test on the canvas
+    if (!id && !e.target.closest("[data-ui]") && doHitTest) {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        const hit = doHitTest(e.clientX - rect.left, e.clientY - rect.top, items, panRef.current.x, panRef.current.y, zoomRef.current);
+        if (hit) { id = hit.id; action = hit.action; }
+      }
+    }
 
     if (id) {
       const item = items.find(i => i.id === id);
