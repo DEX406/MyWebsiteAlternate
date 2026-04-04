@@ -7,11 +7,12 @@ const pendingGenerations = new Set();
 /**
  * Manages mipmap tier selection for all image items on the canvas.
  *
- * For each image, determines the best resolution tier (full / q50 / q25 / q12 / q6)
- * based on DPI-aware logic: only downgrade when the smaller variant has
- * enough pixels to cover the rendered size without upscaling.
+ * Sets two ephemeral properties on each image item:
+ *   - placeholderSrc: always the lowest available variant (loaded first, cheap)
+ *   - targetSrc: the DPI-appropriate variant for crisp rendering
  *
- * Triggers lazy mipmap generation for images that don't have variants yet.
+ * The renderer should show whichever is loaded, preferring targetSrc when ready.
+ * This prevents blanks: the placeholder stays visible until the target is loaded.
  */
 export function useMipmap(items, updateItem, vp) {
   const [settled, setSettled] = useState(0); // increments on each settle
@@ -71,10 +72,17 @@ export function useMipmap(items, updateItem, vp) {
       if (!item.srcQ50 && !item.srcQ25 && !item.srcQ12 && !item.srcQ6) continue; // no variants available
 
       const isOnscreen = itemIsOnscreen(item, bounds);
-      const targetSrc = pickTier(item, zoom, isOnscreen);
+      const target = pickTier(item, zoom, isOnscreen);
+      const placeholder = lowestTier(item);
 
-      if (targetSrc !== item.displaySrc) {
-        updateItem(item.id, { displaySrc: targetSrc });
+      const updates = {};
+      if (target !== item.targetSrc) updates.targetSrc = target;
+      if (placeholder !== item.placeholderSrc) updates.placeholderSrc = placeholder;
+      // Keep displaySrc pointing at target for MipmapImage (DOM) compatibility
+      if (target !== item.displaySrc) updates.displaySrc = target;
+
+      if (Object.keys(updates).length > 0) {
+        updateItem(item.id, updates);
       }
     }
   }, [vp, updateItem]);
@@ -103,10 +111,15 @@ function itemIsOnscreen(item, bounds) {
            item.y > bounds.bottom || itemBottom < bounds.top);
 }
 
+// Returns the lowest available variant (for use as placeholder)
+function lowestTier(item) {
+  return item.srcQ6 || item.srcQ12 || item.srcQ25 || item.srcQ50 || item.src;
+}
+
 function pickTier(item, zoom, isOnscreen) {
   // Off-screen: always use smallest available variant
   if (!isOnscreen) {
-    return item.srcQ6 || item.srcQ12 || item.srcQ25 || item.srcQ50 || item.src;
+    return lowestTier(item);
   }
 
   // On-screen: DPI-aware selection

@@ -19,40 +19,51 @@ function useNaturalSize(src) {
 }
 
 function MipmapImage({ item }) {
-  const currentSrcRef = useRef(item.src);
-  const [activeSrc, setActiveSrc] = useState(item.src);
+  // Start with lowest-res placeholder, upgrade to target when loaded
+  const placeholderSrc = item.placeholderSrc || item.src;
+  const targetSrc = item.targetSrc || item.displaySrc || item.src;
+
+  const [activeSrc, setActiveSrc] = useState(placeholderSrc);
   const [nextSrc, setNextSrc] = useState(null);
   const [nextReady, setNextReady] = useState(false);
 
-  const displaySrc = item.displaySrc || item.src;
-
+  // When placeholder changes and we have nothing better, show it immediately
   useEffect(() => {
-    if (displaySrc === activeSrc) {
+    setActiveSrc(prev => {
+      // Only downgrade to placeholder if current active is the old placeholder or src
+      // (i.e. don't replace a loaded high-res with a placeholder)
+      if (prev === item.src && placeholderSrc !== item.src) return placeholderSrc;
+      return prev;
+    });
+  }, [placeholderSrc, item.src]);
+
+  // Preload the target src; only swap when fully loaded
+  useEffect(() => {
+    if (targetSrc === activeSrc) {
       setNextSrc(null);
       setNextReady(false);
       return;
     }
-    // Preload the new src
     setNextReady(false);
-    setNextSrc(displaySrc);
+    setNextSrc(targetSrc);
     const img = new window.Image();
     let alive = true;
     img.onload = () => {
       if (alive) setNextReady(true);
     };
     img.onerror = () => {
+      // Target failed to load — keep showing whatever we have, don't blank
       if (alive) { setNextSrc(null); setNextReady(false); }
     };
-    img.src = displaySrc;
+    img.src = targetSrc;
     return () => { alive = false; };
-  }, [displaySrc, activeSrc]);
+  }, [targetSrc, activeSrc]);
 
   // When the next image is loaded and crossfade finishes, swap it in
   useEffect(() => {
     if (!nextReady || !nextSrc) return;
     const timer = setTimeout(() => {
       setActiveSrc(nextSrc);
-      currentSrcRef.current = nextSrc;
       setNextSrc(null);
       setNextReady(false);
     }, 250); // match the CSS transition duration

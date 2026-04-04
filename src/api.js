@@ -1,7 +1,7 @@
 const TOKEN_KEY = 'lutz-admin-token';
 const TOKEN_EXPIRY_MS = 24 * 60 * 60 * 1000; // 1 day
 
-const stripDisplaySrc = (items) => items.map(({ displaySrc, _mipmapPending, ...rest }) => rest);
+const stripDisplaySrc = (items) => items.map(({ displaySrc, placeholderSrc, targetSrc, _mipmapPending, ...rest }) => rest);
 
 function getToken() {
   try {
