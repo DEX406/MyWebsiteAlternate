@@ -102,8 +102,9 @@ export class TextureCache {
     return this.fallback;
   }
 
-  // Get the best available texture from a prioritized list of URLs.
-  // Kicks off loading for all URLs but only returns the first one that's ready.
+  // Get the best available texture from a prioritized list of URLs (best-to-worst).
+  // Only kicks off loading for the target (first) and placeholder (last).
+  // Checks all intermediate tiers for an already-cached texture to use in the meantime.
   // Returns { entry, url } of the best ready texture, or fallback.
   getBestReady(candidates, pixelated = false) {
     let bestEntry = null;
@@ -112,11 +113,23 @@ export class TextureCache {
     for (let i = 0; i < candidates.length; i++) {
       const url = candidates[i];
       if (!url) continue;
-      const isPlaceholder = i === candidates.length - 1; // last candidate = lowest res = placeholder
-      const entry = this.get(url, pixelated, isPlaceholder);
-      if (!bestEntry && entry.ready && entry !== this.fallback && entry !== this.transparent) {
-        bestEntry = entry;
-        bestUrl = url;
+      const isFirst = i === 0;
+      const isLast = i === candidates.length - 1;
+
+      if (isFirst || isLast) {
+        // Kick off loading for target (first) and placeholder (last)
+        const entry = this.get(url, pixelated, isLast);
+        if (!bestEntry && entry.ready && entry !== this.fallback && entry !== this.transparent) {
+          bestEntry = entry;
+          bestUrl = url;
+        }
+      } else {
+        // Intermediate tiers: only use if already cached, don't trigger new loads
+        const cached = this.cache.get(url);
+        if (!bestEntry && cached && cached.ready) {
+          bestEntry = cached;
+          bestUrl = url;
+        }
       }
     }
 

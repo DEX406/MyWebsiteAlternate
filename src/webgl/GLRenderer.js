@@ -332,18 +332,25 @@ export class GLRenderer {
 
     // Content
     if (item.type === 'image') {
-      // Build candidate list: prefer targetSrc, fall back to placeholder, then original.
-      // getBestReady kicks off loading for all but only returns the first that's ready.
-      const candidates = [
-        item.targetSrc || item.displaySrc,
-        item.placeholderSrc,
-        item.src,
-      ].filter(Boolean);
-      // Deduplicate while preserving order
+      // Build candidate list from best to worst resolution.
+      // getBestReady kicks off loading for target + placeholder, and
+      // returns the closest already-loaded tier to avoid showing
+      // unnecessarily low-res when a better one is already cached.
+      const target = item.targetSrc || item.displaySrc || item.src;
+      const allTiers = [
+        item.src,       // full res
+        item.srcQ50,
+        item.srcQ25,
+        item.srcQ12,
+        item.srcQ6,     // lowest res
+      ];
+      // Order: target first, then all tiers from high to low res, deduplicated
       const seen = new Set();
-      const unique = [];
-      for (const c of candidates) { if (!seen.has(c)) { seen.add(c); unique.push(c); } }
-      const best = this.texCache.getBestReady(unique, item.pixelated);
+      const candidates = [];
+      for (const c of [target, ...allTiers]) {
+        if (c && !seen.has(c)) { seen.add(c); candidates.push(c); }
+      }
+      const best = this.texCache.getBestReady(candidates, item.pixelated);
       const entry = best.entry;
       gl.uniform1i(u.u_textured, 1);
       gl.activeTexture(gl.TEXTURE0);
