@@ -405,7 +405,7 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
               const blobs = [];
               for (const item of imageItems) {
                 try {
-                  const src = item.originalSrc || item.src;
+                  const src = item.src;
                   let blob;
                   if (src.includes('r2.dev')) {
                     const key = src.replace(/^https?:\/\/[^/]+\//, '');
@@ -427,16 +427,21 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
                 document.body.removeChild(a); URL.revokeObjectURL(url);
               };
               if (blobs.length > 0) {
-                const shareBlobs = blobs.filter(({ blob }) => blob.type.startsWith('image/'));
-                const downloadBlobs = blobs.filter(({ blob }) => !blob.type.startsWith('image/'));
-                if (shareBlobs.length > 0) {
-                  const files = shareBlobs.map(({ blob, filename }) => new File([blob], filename, { type: blob.type }));
-                  if (navigator.canShare && navigator.canShare({ files })) {
-                    try { await navigator.share({ files, title: files.length === 1 ? files[0].name : `${files.length} images` }); }
-                    catch (err) { if (err.name !== 'AbortError') failed += files.length; }
-                  } else { shareBlobs.forEach(triggerDownload); }
+                const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+                if (isMobile) {
+                  const shareBlobs = blobs.filter(({ blob }) => blob.type.startsWith('image/'));
+                  const downloadBlobs = blobs.filter(({ blob }) => !blob.type.startsWith('image/'));
+                  if (shareBlobs.length > 0) {
+                    const files = shareBlobs.map(({ blob, filename }) => new File([blob], filename, { type: blob.type }));
+                    if (navigator.canShare && navigator.canShare({ files })) {
+                      try { await navigator.share({ files, title: files.length === 1 ? files[0].name : `${files.length} images` }); }
+                      catch (err) { if (err.name !== 'AbortError') failed += files.length; }
+                    } else { shareBlobs.forEach(triggerDownload); }
+                  }
+                  downloadBlobs.forEach(triggerDownload);
+                } else {
+                  blobs.forEach(triggerDownload);
                 }
-                downloadBlobs.forEach(triggerDownload);
               }
               setUploadStatus(failed > 0 ? `${failed} failed` : imageItems.length > 1 ? `${imageItems.length} files saved` : "Saved to device");
               setTimeout(() => setUploadStatus(""), 3000);
