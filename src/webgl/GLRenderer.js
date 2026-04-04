@@ -79,7 +79,7 @@ export class GLRenderer {
     this.texCache = new TextureCache(gl, () => {
       if (this._onNeedsRedraw) this._onNeedsRedraw();
     });
-    this.textRenderer = new TextRenderer(gl);
+    this.textRenderer = new TextRenderer(gl, SUPERSAMPLE);
 
     this._initPrograms();
     this._initGeometry();
