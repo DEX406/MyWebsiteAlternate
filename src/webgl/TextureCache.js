@@ -4,14 +4,15 @@
 const MAX_TEXTURES = 200; // max cached textures before eviction kicks in
 
 export class TextureCache {
-  constructor(gl) {
+  constructor(gl, onTextureReady) {
     this.gl = gl;
     this.cache = new Map(); // url → { tex, width, height, ready, isPlaceholder, insertOrder }
     this.videos = new Map(); // itemId → { video, tex, needsUpdate }
     this.loading = new Set(); // urls currently loading
     this.insertCounter = 0; // monotonic counter for FIFO ordering
-    // 1x1 white fallback texture
-    this.fallback = this._create1x1([255, 255, 255, 255]);
+    this._onTextureReady = onTextureReady || null; // callback when any texture finishes loading
+    // 1x1 transparent fallback texture (used while images load)
+    this.fallback = this._create1x1([0, 0, 0, 0]);
     // 1x1 transparent fallback
     this.transparent = this._create1x1([0, 0, 0, 0]);
   }
@@ -92,6 +93,7 @@ export class TextureCache {
           ready: true, isPlaceholder, insertOrder: this.insertCounter++,
         });
         this._evict();
+        if (this._onTextureReady) this._onTextureReady();
       };
       img.onerror = () => {
         this.loading.delete(url);

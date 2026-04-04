@@ -15,7 +15,22 @@ export function useWebGLCanvas() {
   const initRenderer = useCallback((canvas) => {
     if (!canvas || rendererRef.current) return;
     try {
-      rendererRef.current = new GLRenderer(canvas);
+      const renderer = new GLRenderer(canvas);
+      // When a texture finishes loading async, schedule a repaint so the
+      // canvas updates without waiting for the next user interaction.
+      renderer._onNeedsRedraw = () => {
+        const d = renderDataRef.current;
+        if (!d) return;
+        if (!rafRef.current) {
+          rafRef.current = requestAnimationFrame(() => {
+            rafRef.current = 0;
+            if (rendererRef.current && renderDataRef.current) {
+              rendererRef.current.render(renderDataRef.current);
+            }
+          });
+        }
+      };
+      rendererRef.current = renderer;
     } catch (e) {
       console.error('Failed to create WebGL renderer:', e);
     }

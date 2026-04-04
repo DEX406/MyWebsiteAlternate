@@ -75,7 +75,10 @@ export class GLRenderer {
     if (!gl) throw new Error('WebGL2 not supported');
     this.gl = gl;
 
-    this.texCache = new TextureCache(gl);
+    this._onNeedsRedraw = null; // set by consumer to trigger repaint on async texture load
+    this.texCache = new TextureCache(gl, () => {
+      if (this._onNeedsRedraw) this._onNeedsRedraw();
+    });
     this.textRenderer = new TextRenderer(gl);
 
     this._initPrograms();
