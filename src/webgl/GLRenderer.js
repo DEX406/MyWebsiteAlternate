@@ -61,6 +61,8 @@ function getUniforms(gl, prog, names) {
   return u;
 }
 
+const SUPERSAMPLE = 2; // 2x supersampling multiplier on top of DPR
+
 export class GLRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -168,9 +170,9 @@ export class GLRenderer {
     gl.bindVertexArray(null);
   }
 
-  // Resize canvas to match display size × DPR
+  // Resize canvas to match display size × DPR × supersample
   resize() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = (window.devicePixelRatio || 1) * SUPERSAMPLE;
     const canvas = this.canvas;
     const parent = canvas.parentElement;
     if (!parent) return;
@@ -189,7 +191,7 @@ export class GLRenderer {
   // Main render call
   render({ items, panX, panY, zoom, bgGrid, globalShadow, selectedIds, editingTextId }) {
     const gl = this.gl;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = (window.devicePixelRatio || 1) * SUPERSAMPLE;
 
     this.resize();
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
