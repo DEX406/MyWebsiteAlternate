@@ -82,6 +82,7 @@ export async function cleanupFiles(items) {
   for (const i of items) {
     if (i.type !== "image" && i.type !== "video") continue;
     if (i.src) usedUrls.add(i.src);
+    if (i.originalSrc) usedUrls.add(i.originalSrc);
     if (i.srcQ50) usedUrls.add(i.srcQ50);
     if (i.srcQ25) usedUrls.add(i.srcQ25);
     if (i.srcQ12) usedUrls.add(i.srcQ12);

@@ -362,7 +362,7 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
                     <option value="25" style={{ background: "#1F1E1D" }}>25%</option>
                   </select>
                   {!isMulti && sel.originalSrc && sel.src !== sel.originalSrc && (
-                    <Toggle label="Revert" active onClick={() => updateItem(sel.id, { src: sel.originalSrc })} />
+                    <Toggle label="Revert" active onClick={() => updateItem(sel.id, { src: sel.originalSrc, srcQ50: null, srcQ25: null, srcQ12: null, srcQ6: null, naturalWidth: null, naturalHeight: null })} />
                   )}
                 </>
               )}
@@ -394,7 +394,7 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
               const blobs = [];
               for (const item of imageItems) {
                 try {
-                  const src = item.originalSrc || item.src;
+                  const src = item.src;
                   let blob;
                   if (src.includes('r2.dev')) {
                     const key = src.replace(/^https?:\/\/[^/]+\//, '');
