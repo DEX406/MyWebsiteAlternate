@@ -68,7 +68,6 @@ export class GLRenderer {
     this.canvas = canvas;
     const gl = canvas.getContext('webgl2', {
       alpha: false,
-      desynchronized: true,
       antialias: false,
       powerPreference: 'default',
       premultipliedAlpha: false,
