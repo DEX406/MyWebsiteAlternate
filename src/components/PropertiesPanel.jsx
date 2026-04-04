@@ -338,7 +338,7 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
                   setUploadStatus("Storing...");
                   try {
                     const result = await serverResize(sel.src, 1);
-                    updateItem(sel.id, { src: result.url, originalSrc: sel.src });
+                    updateItem(sel.id, { src: result.url });
                     setUploadStatus("Stored in R2");
                   } catch (err) { setUploadStatus(err.message || "Failed to store"); }
                   setTimeout(() => setUploadStatus(""), 3000);
@@ -361,9 +361,6 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
                     <option value="50" style={{ background: "#1F1E1D" }}>50%</option>
                     <option value="25" style={{ background: "#1F1E1D" }}>25%</option>
                   </select>
-                  {!isMulti && sel.originalSrc && sel.src !== sel.originalSrc && (
-                    <Toggle label="Revert" active onClick={() => updateItem(sel.id, { src: sel.originalSrc })} />
-                  )}
                 </>
               )}
             </div>
@@ -394,7 +391,7 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
               const blobs = [];
               for (const item of imageItems) {
                 try {
-                  const src = item.originalSrc || item.src;
+                  const src = item.src;
                   let blob;
                   if (src.includes('r2.dev')) {
                     const key = src.replace(/^https?:\/\/[^/]+\//, '');
@@ -416,16 +413,21 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
                 document.body.removeChild(a); URL.revokeObjectURL(url);
               };
               if (blobs.length > 0) {
-                const shareBlobs = blobs.filter(({ blob }) => blob.type.startsWith('image/'));
-                const downloadBlobs = blobs.filter(({ blob }) => !blob.type.startsWith('image/'));
-                if (shareBlobs.length > 0) {
-                  const files = shareBlobs.map(({ blob, filename }) => new File([blob], filename, { type: blob.type }));
-                  if (navigator.canShare && navigator.canShare({ files })) {
-                    try { await navigator.share({ files, title: files.length === 1 ? files[0].name : `${files.length} images` }); }
-                    catch (err) { if (err.name !== 'AbortError') failed += files.length; }
-                  } else { shareBlobs.forEach(triggerDownload); }
+                const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+                if (isMobile) {
+                  const shareBlobs = blobs.filter(({ blob }) => blob.type.startsWith('image/'));
+                  const downloadBlobs = blobs.filter(({ blob }) => !blob.type.startsWith('image/'));
+                  if (shareBlobs.length > 0) {
+                    const files = shareBlobs.map(({ blob, filename }) => new File([blob], filename, { type: blob.type }));
+                    if (navigator.canShare && navigator.canShare({ files })) {
+                      try { await navigator.share({ files, title: files.length === 1 ? files[0].name : `${files.length} images` }); }
+                      catch (err) { if (err.name !== 'AbortError') failed += files.length; }
+                    } else { shareBlobs.forEach(triggerDownload); }
+                  }
+                  downloadBlobs.forEach(triggerDownload);
+                } else {
+                  blobs.forEach(triggerDownload);
                 }
-                downloadBlobs.forEach(triggerDownload);
               }
               setUploadStatus(failed > 0 ? `${failed} failed` : imageItems.length > 1 ? `${imageItems.length} files saved` : "Saved to device");
               setTimeout(() => setUploadStatus(""), 3000);

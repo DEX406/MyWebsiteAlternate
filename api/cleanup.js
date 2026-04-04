@@ -1,9 +1,7 @@
 import { ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { kv } from '@vercel/kv';
 import { verifyAuth } from './_auth.js';
 import { r2, BUCKET, R2_PUBLIC_URL } from './_r2.js';
 
-const KV_RESIZE_ORIGINALS = 'resize-originals-v1';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -54,9 +52,6 @@ export default async function handler(req, res) {
         console.error('Failed to delete:', obj.Key, e.message);
       }
     }
-
-    // Also clear the resize-originals tracking since we just cleaned everything
-    try { await kv.set(KV_RESIZE_ORIGINALS, []); } catch (e) { /* ignore */ }
 
     return res.status(200).json({
       deleted,

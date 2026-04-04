@@ -542,7 +542,10 @@ export default function App() {
 
   const handleCleanup = async () => {
     setUploadStatus("Cleaning up...");
-    try { const result = await cleanupFiles(items); setUploadStatus(`Cleaned ${result.deleted || 0} files`); }
+    try {
+      const result = await cleanupFiles(items);
+      setUploadStatus(`Cleaned ${result.deleted || 0} files`);
+    }
     catch { setUploadStatus("Cleanup failed"); }
     setTimeout(() => setUploadStatus(""), 3000);
   };
@@ -556,7 +559,12 @@ export default function App() {
     for (const item of list) {
       try {
         const { url } = await serverResize(item.src, scale);
-        updateItem(item.id, { src: url, originalSrc: item.originalSrc || item.src });
+        updateItem(item.id, {
+          src: url,
+          // Clear mipmaps — new ones will auto-generate for resized src
+          srcQ50: null, srcQ25: null, srcQ12: null, srcQ6: null,
+          displaySrc: null, placeholderSrc: null, targetSrc: null,
+        });
         done++;
         setUploadStatus(`Resizing ${done}/${total}...`);
       } catch (err) {
