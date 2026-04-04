@@ -498,17 +498,17 @@ export class GLRenderer {
       }
 
       pts.push([x1, y1]);
-      // First corner
+      // First corner — arc center inset diagonally from the sharp corner
       if (r1 >= 0.5) {
         pts.push([elbowX - s1 * r1, y1]);
-        this._arcPoints(pts, elbowX - s1 * r1, y1, elbowX, y1 + sv * r1, elbowX, y1, r1, 8);
+        this._arcPoints(pts, elbowX - s1 * r1, y1, elbowX, y1 + sv * r1, elbowX - s1 * r1, y1 + sv * r1, r1, 8);
       } else {
         pts.push([elbowX, y1]);
       }
-      // Second corner
+      // Second corner — arc center inset diagonally from the sharp corner
       if (r2 >= 0.5) {
         pts.push([elbowX, y2 - sv * r2]);
-        this._arcPoints(pts, elbowX, y2 - sv * r2, elbowX + s2 * r2, y2, elbowX, y2, r2, 8);
+        this._arcPoints(pts, elbowX, y2 - sv * r2, elbowX + s2 * r2, y2, elbowX + s2 * r2, y2 - sv * r2, r2, 8);
       } else {
         pts.push([elbowX, y2]);
       }
@@ -526,13 +526,13 @@ export class GLRenderer {
       pts.push([x1, y1]);
       if (r1 >= 0.5) {
         pts.push([x1, elbowY - sv1 * r1]);
-        this._arcPoints(pts, x1, elbowY - sv1 * r1, x1 + sh * r1, elbowY, x1, elbowY, r1, 8);
+        this._arcPoints(pts, x1, elbowY - sv1 * r1, x1 + sh * r1, elbowY, x1 + sh * r1, elbowY - sv1 * r1, r1, 8);
       } else {
         pts.push([x1, elbowY]);
       }
       if (r2 >= 0.5) {
         pts.push([x2 - sh * r2, elbowY]);
-        this._arcPoints(pts, x2 - sh * r2, elbowY, x2, elbowY + sv2 * r2, x2, elbowY, r2, 8);
+        this._arcPoints(pts, x2 - sh * r2, elbowY, x2, elbowY + sv2 * r2, x2 - sh * r2, elbowY + sv2 * r2, r2, 8);
       } else {
         pts.push([x2, elbowY]);
       }
