@@ -561,6 +561,9 @@ export default function App() {
         const { url } = await serverResize(item.src, scale);
         updateItem(item.id, {
           src: url,
+          // Update natural dimensions to reflect the resized image
+          naturalWidth: Math.round((item.naturalWidth || item.w) * scale),
+          naturalHeight: Math.round((item.naturalHeight || item.h) * scale),
           // Clear mipmaps — new ones will auto-generate for resized src
           srcQ50: null, srcQ25: null, srcQ12: null, srcQ6: null,
           displaySrc: null, placeholderSrc: null, targetSrc: null,
