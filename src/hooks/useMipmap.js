@@ -123,21 +123,24 @@ function pickTier(item, zoom, isOnscreen) {
   }
 
   // On-screen: DPI-aware selection
-  // renderedWidth = the CSS pixel width this item occupies on screen
-  const renderedWidth = item.w * zoom;
-
-  // Natural width of each variant (power-of-2 halving chain).
-  // We use item.naturalWidth if available, otherwise fall back to item.w (the canvas size)
+  // The frame crops the image with object-fit:cover, so the image may be
+  // larger than the frame. Compute the actual image size as rendered (before
+  // cropping) so mipmap selection reflects the true displayed resolution.
   const natW = item.naturalWidth || item.w;
+  const natH = item.naturalHeight || item.h;
+  const coverScale = Math.max(item.w / natW, item.h / natH);
+  const renderedSize = Math.max(natW, natH) * coverScale * zoom;
 
-  const q6Width = natW * 0.0625;
-  const q12Width = natW * 0.125;
-  const q25Width = natW * 0.25;
-  const q50Width = natW * 0.50;
+  const natSize = Math.max(natW, natH);
 
-  if (item.srcQ6 && q6Width >= renderedWidth) return item.srcQ6;
-  if (item.srcQ12 && q12Width >= renderedWidth) return item.srcQ12;
-  if (item.srcQ25 && q25Width >= renderedWidth) return item.srcQ25;
-  if (item.srcQ50 && q50Width >= renderedWidth) return item.srcQ50;
+  const q6Size = natSize * 0.0625;
+  const q12Size = natSize * 0.125;
+  const q25Size = natSize * 0.25;
+  const q50Size = natSize * 0.50;
+
+  if (item.srcQ6 && q6Size >= renderedSize) return item.srcQ6;
+  if (item.srcQ12 && q12Size >= renderedSize) return item.srcQ12;
+  if (item.srcQ25 && q25Size >= renderedSize) return item.srcQ25;
+  if (item.srcQ50 && q50Size >= renderedSize) return item.srcQ50;
   return item.src;
 }
