@@ -129,8 +129,7 @@ function pickTier(item, zoom, isOnscreen) {
   const natW = item.naturalWidth || item.w;
   const natH = item.naturalHeight || item.h;
   const coverScale = Math.max(item.w / natW, item.h / natH);
-  const dpr = window.devicePixelRatio || 1;
-  const renderedSize = Math.max(natW, natH) * coverScale * zoom * dpr;
+  const renderedSize = Math.max(natW, natH) * coverScale * zoom;
 
   const natSize = Math.max(natW, natH);
 
