@@ -236,7 +236,6 @@ out vec4 outColor;
 void main() {
   float d = length(v_uv);
   if (d > 1.0) discard;
-  float aa = 1.0 - smoothstep(0.85, 1.0, d);
-  outColor = vec4(u_color.rgb, u_color.a * aa);
+  outColor = u_color;
 }
 `;
