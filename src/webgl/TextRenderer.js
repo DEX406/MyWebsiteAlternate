@@ -1,127 +1,219 @@
-// Renders text items to offscreen Canvas2D and uploads as WebGL textures.
-// Caches based on a hash of all text-affecting properties.
+// SDF-based text renderer.  Lays out text as per-glyph quads and draws
+// them using a signed-distance-field shader for crisp edges at any zoom.
+
+import { SDFAtlas, SDF_FONT_SIZE, SDF_BUFFER, ATLAS_SIZE } from './SDFAtlas.js';
+import { SDF_VERT, SDF_FRAG } from './shaders.js';
+
+function compileShader(gl, type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error('SDF shader compile:', gl.getShaderInfoLog(s));
+    gl.deleteShader(s);
+    return null;
+  }
+  return s;
+}
+
+function createProgram(gl, vert, frag) {
+  const prog = gl.createProgram();
+  const vs = compileShader(gl, gl.VERTEX_SHADER, vert);
+  const fs = compileShader(gl, gl.FRAGMENT_SHADER, frag);
+  if (!vs || !fs) return null;
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error('SDF program link:', gl.getProgramInfoLog(prog));
+    return null;
+  }
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+  return prog;
+}
 
 export class TextRenderer {
-  constructor(gl, supersample = 1) {
+  constructor(gl) {
     this.gl = gl;
-    this.supersample = supersample;
-    this.cache = new Map(); // hash → { tex, width, height }
-    this.canvas = document.createElement('canvas');
-    this.ctx = this.canvas.getContext('2d');
-  }
+    this.atlas = new SDFAtlas(gl);
+    this._layoutCache = new Map();
 
-  // Generate a cache key from item properties
-  _key(item) {
-    return `${item.id}|${item.text}|${item.fontSize}|${item.fontFamily}|${item.color}|${item.bold}|${item.italic}|${item.align}|${item.w}|${item.h}|${item.bgColor}|${item.bgOpacity ?? 1}`;
-  }
-
-  // Get or create a texture for a text/link item.
-  // Returns { tex, width, height }
-  get(item) {
-    const key = this._key(item);
-    const cached = this.cache.get(key);
-    if (cached) {
-      cached.lastUsed = performance.now();
-      return cached;
+    // SDF shader
+    this.prog = createProgram(gl, SDF_VERT, SDF_FRAG);
+    this.u = {};
+    for (const n of ['u_resolution', 'u_pan', 'u_zoom', 'u_offset', 'u_rotation', 'u_rotCenter', 'u_atlas', 'u_color']) {
+      this.u[n] = gl.getUniformLocation(this.prog, n);
     }
 
-    const entry = this._render(item);
-    entry.lastUsed = performance.now();
-    this.cache.set(key, entry);
-
-    // Evict old entries if cache is large
-    if (this.cache.size > 200) this._evict();
-
-    return entry;
+    // VAO + dynamic VBO (interleaved: x, y, u, v  per vertex)
+    this.vao = gl.createVertexArray();
+    gl.bindVertexArray(this.vao);
+    this.vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+    const stride = 16; // 4 floats * 4 bytes
+    const posLoc = gl.getAttribLocation(this.prog, 'a_pos');
+    const uvLoc = gl.getAttribLocation(this.prog, 'a_uv');
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(uvLoc);
+    gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, stride, 8);
+    gl.bindVertexArray(null);
   }
 
-  _render(item) {
+  // Called by GLRenderer for each text/link item.
+  draw(item, panX, panY, zoom, resW, resH) {
+    if (!item.text) return;
+
+    const layout = this._getLayout(item);
+    if (!layout || layout.vertCount === 0) return;
+
+    this.atlas.flush();
+
     const gl = this.gl;
-    const dpr = window.devicePixelRatio || 1;
-    const scale = dpr * this.supersample;
-    const w = Math.ceil(item.w * scale);
-    const h = Math.ceil(item.h * scale);
+    gl.useProgram(this.prog);
+    gl.bindVertexArray(this.vao);
 
-    this.canvas.width = w;
-    this.canvas.height = h;
-    const ctx = this.ctx;
+    gl.uniform2f(this.u.u_resolution, resW, resH);
+    gl.uniform2f(this.u.u_pan, panX, panY);
+    gl.uniform1f(this.u.u_zoom, zoom);
+    gl.uniform2f(this.u.u_offset, item.x, item.y);
+    gl.uniform1f(this.u.u_rotation, (item.rotation || 0) * Math.PI / 180);
+    gl.uniform2f(this.u.u_rotCenter, item.x + item.w * 0.5, item.y + item.h * 0.5);
 
-    ctx.clearRect(0, 0, w, h);
-    ctx.scale(scale, scale);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.atlas.texture);
+    gl.uniform1i(this.u.u_atlas, 0);
 
-    // Background
-    const bgColor = this._applyBg(item);
-    if (bgColor !== 'transparent') {
-      ctx.fillStyle = bgColor;
-      ctx.fillRect(0, 0, item.w, item.h);
-    }
+    const rgb = hexToRgb(item.color || '#C2C0B6');
+    gl.uniform4f(this.u.u_color, rgb[0], rgb[1], rgb[2], 1.0);
 
-    // Text
-    if (item.text) {
-      const padX = 12, padY = 8;
-      const fontSize = item.fontSize || 24;
-      const fontWeight = item.bold ? 'bold' : 'normal';
-      const fontStyle = item.italic ? 'italic' : 'normal';
-      const fontFamily = item.fontFamily || "'DM Sans', sans-serif";
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, layout.verts, gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, layout.vertCount);
 
-      ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
-      ctx.fillStyle = item.color || '#C2C0B6';
-      ctx.textBaseline = 'top';
-      ctx.textAlign = item.align || 'left';
-
-      const maxWidth = item.w - padX * 2;
-      const lines = this._wrapText(ctx, item.text, maxWidth);
-      const lineHeight = fontSize * 1.3;
-
-      let x;
-      if (item.align === 'center') x = item.w / 2;
-      else if (item.align === 'right') x = item.w - padX;
-      else x = padX;
-
-      // For link items, vertically center
-      let startY = padY;
-      if (item.type === 'link') {
-        const totalHeight = lines.length * lineHeight;
-        startY = (item.h - totalHeight) / 2;
-      }
-
-      for (let i = 0; i < lines.length; i++) {
-        const y = startY + i * lineHeight;
-        if (y + lineHeight > item.h) break;
-        ctx.fillText(lines[i], x, y);
-      }
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-    // Upload to texture
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.canvas);
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-    return { tex, width: w, height: h };
+    gl.bindVertexArray(null);
   }
 
-  _wrapText(ctx, text, maxWidth) {
+  // --- layout caching ---
+
+  _getLayout(item) {
+    const key = `${item.id}|${item.text}|${item.fontSize}|${item.fontFamily}|${item.bold}|${item.italic}|${item.align}|${item.w}|${item.h}|${item.type}`;
+    let cached = this._layoutCache.get(key);
+    if (cached) { cached.lastUsed = performance.now(); return cached; }
+
+    cached = this._buildLayout(item);
+    cached.lastUsed = performance.now();
+    this._layoutCache.set(key, cached);
+    if (this._layoutCache.size > 300) this._evict();
+    return cached;
+  }
+
+  _buildLayout(item) {
+    const atlas = this.atlas;
+    const fontSize = item.fontSize || 24;
+    const fontFamily = item.fontFamily || "'DM Sans', sans-serif";
+    const bold = !!item.bold;
+    const italic = !!item.italic;
+    const align = item.align || 'left';
+    const padX = 12, padY = 8;
+    const maxWidth = item.w - padX * 2;
+    const lineHeight = fontSize * 1.3;
+    const scale = fontSize / SDF_FONT_SIZE;
+
+    const fontAscent = atlas.getFontAscent(fontFamily, bold, italic);
+    const lines = this._wrapText(item.text, fontFamily, bold, italic, fontSize, maxWidth);
+
+    // Vertical start
+    let startY;
+    if (item.type === 'link') {
+      startY = (item.h - lines.length * lineHeight) / 2;
+    } else {
+      startY = padY;
+    }
+
+    const verts = [];
+
+    for (let li = 0; li < lines.length; li++) {
+      const lineTop = startY + li * lineHeight;
+      if (lineTop + lineHeight > item.h) break;
+
+      const line = lines[li];
+      if (!line) continue;
+
+      // Measure line width for alignment
+      let lineWidth = 0;
+      for (const char of line) {
+        lineWidth += atlas.getGlyph(char, fontFamily, bold, italic).advance * scale;
+      }
+
+      let penX;
+      if (align === 'center') penX = (item.w - lineWidth) / 2;
+      else if (align === 'right') penX = item.w - padX - lineWidth;
+      else penX = padX;
+
+      const baselineY = lineTop + fontAscent * scale;
+
+      for (const char of line) {
+        const g = atlas.getGlyph(char, fontFamily, bold, italic);
+
+        if (!g.space && g.sdfW > 0 && g.sdfH > 0) {
+          // Glyph quad relative to item origin
+          const qx = penX - (g.bearingX + SDF_BUFFER) * scale;
+          const qy = baselineY - (g.bearingY + SDF_BUFFER) * scale;
+          const qw = g.sdfW * scale;
+          const qh = g.sdfH * scale;
+
+          // Atlas UVs
+          const u0 = g.atlasX / ATLAS_SIZE;
+          const v0 = g.atlasY / ATLAS_SIZE;
+          const u1 = (g.atlasX + g.sdfW) / ATLAS_SIZE;
+          const v1 = (g.atlasY + g.sdfH) / ATLAS_SIZE;
+
+          verts.push(
+            qx,      qy,      u0, v0,
+            qx + qw, qy,      u1, v0,
+            qx,      qy + qh, u0, v1,
+            qx,      qy + qh, u0, v1,
+            qx + qw, qy,      u1, v0,
+            qx + qw, qy + qh, u1, v1,
+          );
+        }
+
+        penX += g.advance * scale;
+      }
+    }
+
+    return { verts: new Float32Array(verts), vertCount: verts.length / 4 };
+  }
+
+  _wrapText(text, fontFamily, bold, italic, fontSize, maxWidth) {
+    const atlas = this.atlas;
+    const scale = fontSize / SDF_FONT_SIZE;
     const lines = [];
-    // Handle explicit newlines (pre-wrap)
-    const paragraphs = text.split('\n');
-    for (const para of paragraphs) {
+
+    for (const para of text.split('\n')) {
       if (!para) { lines.push(''); continue; }
       const words = para.split(/(\s+)/);
       let currentLine = '';
+      let currentWidth = 0;
+
       for (const word of words) {
-        const test = currentLine + word;
-        if (ctx.measureText(test).width > maxWidth && currentLine) {
+        let wordWidth = 0;
+        for (const ch of word) {
+          wordWidth += atlas.getGlyph(ch, fontFamily, bold, italic).advance * scale;
+        }
+
+        if (currentWidth + wordWidth > maxWidth && currentLine) {
           lines.push(currentLine);
           currentLine = word.trimStart();
+          currentWidth = 0;
+          for (const ch of currentLine) {
+            currentWidth += atlas.getGlyph(ch, fontFamily, bold, italic).advance * scale;
+          }
         } else {
-          currentLine = test;
+          currentLine += word;
+          currentWidth += wordWidth;
         }
       }
       if (currentLine) lines.push(currentLine);
@@ -129,41 +221,28 @@ export class TextRenderer {
     return lines.length ? lines : [''];
   }
 
-  _applyBg(item) {
-    if (!item.bgColor || item.bgColor === 'transparent') return 'transparent';
-    const op = item.bgOpacity ?? 1;
-    if (op <= 0) return 'transparent';
-    const hex = item.bgColor.replace('#', '');
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    return op >= 1 ? item.bgColor : `rgba(${r},${g},${b},${op})`;
-  }
-
   _evict() {
-    // Remove oldest 50 entries
-    const entries = [...this.cache.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-    const toRemove = entries.slice(0, 50);
-    for (const [key, entry] of toRemove) {
-      this.gl.deleteTexture(entry.tex);
-      this.cache.delete(key);
-    }
+    const entries = [...this._layoutCache.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+    for (const [key] of entries.slice(0, 100)) this._layoutCache.delete(key);
   }
 
-  // Invalidate a specific item's cache (call when item text/style changes)
   invalidate(itemId) {
-    for (const [key, entry] of this.cache) {
-      if (key.startsWith(itemId + '|')) {
-        this.gl.deleteTexture(entry.tex);
-        this.cache.delete(key);
-      }
+    for (const key of this._layoutCache.keys()) {
+      if (key.startsWith(itemId + '|')) this._layoutCache.delete(key);
     }
   }
 
   destroy() {
-    for (const entry of this.cache.values()) {
-      this.gl.deleteTexture(entry.tex);
-    }
-    this.cache.clear();
+    this.atlas.destroy();
+    this._layoutCache.clear();
   }
+}
+
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  return [
+    parseInt(h.slice(0, 2), 16) / 255,
+    parseInt(h.slice(2, 4), 16) / 255,
+    parseInt(h.slice(4, 6), 16) / 255,
+  ];
 }

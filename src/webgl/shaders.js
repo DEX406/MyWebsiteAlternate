@@ -239,3 +239,50 @@ void main() {
   outColor = u_color;
 }
 `;
+
+// ── SDF text shader: renders glyphs from a signed distance field atlas ──
+export const SDF_VERT = `#version 300 es
+precision highp float;
+in vec2 a_pos;  // glyph-local position (relative to item origin)
+in vec2 a_uv;   // atlas UV
+
+uniform vec2 u_resolution;
+uniform vec2 u_pan;
+uniform float u_zoom;
+uniform vec2 u_offset;   // item world position
+uniform float u_rotation; // item rotation in radians
+uniform vec2 u_rotCenter; // rotation center (item center in world)
+
+out vec2 v_uv;
+
+void main() {
+  v_uv = a_uv;
+  vec2 world = a_pos + u_offset;
+  // Rotate around item center
+  vec2 d = world - u_rotCenter;
+  float c = cos(u_rotation), s = sin(u_rotation);
+  world = u_rotCenter + vec2(d.x * c - d.y * s, d.x * s + d.y * c);
+  vec2 screen = world * u_zoom + u_pan;
+  vec2 ndc = screen / u_resolution * 2.0 - 1.0;
+  ndc.y = -ndc.y;
+  gl_Position = vec4(ndc, 0.0, 1.0);
+}
+`;
+
+export const SDF_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+
+uniform sampler2D u_atlas;
+uniform vec4 u_color;
+
+out vec4 outColor;
+
+void main() {
+  float dist = texture(u_atlas, v_uv).r;
+  float smoothing = fwidth(dist) * 0.5;
+  float alpha = smoothstep(0.5 - smoothing, 0.5 + smoothing, dist);
+  if (alpha < 0.005) discard;
+  outColor = vec4(u_color.rgb, u_color.a * alpha);
+}
+`;
