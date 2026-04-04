@@ -542,7 +542,19 @@ export default function App() {
 
   const handleCleanup = async () => {
     setUploadStatus("Cleaning up...");
-    try { const result = await cleanupFiles(items); setUploadStatus(`Cleaned ${result.deleted || 0} files`); }
+    try {
+      const result = await cleanupFiles(items);
+      // Originals are gone after cleanup — clear revert state so next resize
+      // sets a fresh baseline and revert doesn't point to deleted files
+      if (result.deleted > 0) {
+        setItemsAndSave(prev => prev.map(item =>
+          item.originalSrc
+            ? { ...item, originalSrc: null, originalSrcQ50: null, originalSrcQ25: null, originalSrcQ12: null, originalSrcQ6: null }
+            : item
+        ));
+      }
+      setUploadStatus(`Cleaned ${result.deleted || 0} files`);
+    }
     catch { setUploadStatus("Cleanup failed"); }
     setTimeout(() => setUploadStatus(""), 3000);
   };
