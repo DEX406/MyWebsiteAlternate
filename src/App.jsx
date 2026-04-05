@@ -111,19 +111,9 @@ export default function App() {
     return () => ro.disconnect();
   }, []);
 
-  // Continuous render for video items (need to update video textures each frame)
-  useEffect(() => {
-    const hasVideo = items.some(i => i.type === 'video');
-    if (!hasVideo) return;
-    let running = true;
-    const loop = () => {
-      if (!running) return;
-      if (drawBgRef.current) drawBgRef.current();
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
-    return () => { running = false; };
-  }, [items]);
+  // Video texture updates are now driven by requestVideoFrameCallback / timeupdate
+  // inside TextureCache, which calls _onNeedsRedraw → requestRender automatically.
+  // No continuous rAF loop is needed here.
 
   // ── Load board on mount ──
   useEffect(() => {

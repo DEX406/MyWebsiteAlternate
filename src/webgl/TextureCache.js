@@ -136,26 +136,33 @@ export class TextureCache {
 
   // Get or create a video texture for a video item.
   // Returns { tex, video, width, height, ready }.
+  // Texture updates are driven by requestVideoFrameCallback (or timeupdate fallback)
+  // rather than polling every render frame, to avoid continuous 60fps GPU load.
   getVideo(itemId, src) {
     let entry = this.videos.get(itemId);
     if (entry && entry.src === src) {
-      // Update texture from video frame if playing
-      if (entry.video.readyState >= 2) {
-        const gl = this.gl;
-        gl.bindTexture(gl.TEXTURE_2D, entry.tex);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, entry.video);
-        entry.ready = true;
-        entry.width = entry.video.videoWidth;
-        entry.height = entry.video.videoHeight;
+      // Upload a new frame only when the frame-callback has flagged one as available
+      if (entry.needsTextureUpdate && entry.video.readyState >= 2) {
+        try {
+          const gl = this.gl;
+          gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, entry.video);
+          entry.ready = true;
+          entry.width = entry.video.videoWidth;
+          entry.height = entry.video.videoHeight;
+        } catch (e) {
+          // SecurityError: video is cross-origin without proper CORS headers.
+          // Mark as unrenderable so we stop trying and just show the placeholder.
+          entry.corsBlocked = true;
+        }
+        entry.needsTextureUpdate = false;
       }
       return entry;
     }
 
-    // Clean up old video
+    // Clean up old video (src changed)
     if (entry) {
-      entry.video.pause();
-      entry.video.src = '';
-      this.gl.deleteTexture(entry.tex);
+      this._destroyVideoEntry(entry);
     }
 
     // Create new video element
@@ -166,7 +173,8 @@ export class TextureCache {
     video.muted = true;
     video.playsInline = true;
     video.src = src;
-    video.play().catch(() => {});
+    const playPromise = video.play();
+    if (playPromise !== undefined) playPromise.catch(() => {});
 
     const gl = this.gl;
     const tex = gl.createTexture();
@@ -177,8 +185,31 @@ export class TextureCache {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    const newEntry = { video, tex, src, width: 1, height: 1, ready: false };
+    const newEntry = { video, tex, src, width: 1, height: 1, ready: false, needsTextureUpdate: false, corsBlocked: false, onNewFrame: null };
     this.videos.set(itemId, newEntry);
+
+    // Schedule texture uploads driven by actual video frame delivery.
+    // requestVideoFrameCallback fires exactly when a new decoded frame is ready
+    // (Chrome/Safari). For other browsers fall back to the timeupdate event which
+    // fires ~4× per second — enough to keep the video looking live.
+    const onNewFrame = () => {
+      if (newEntry.corsBlocked) return;
+      newEntry.needsTextureUpdate = true;
+      if (this._onTextureReady) this._onTextureReady();
+      // Re-arm for the next frame (only needed for requestVideoFrameCallback;
+      // timeupdate re-fires automatically).
+      if (typeof video.requestVideoFrameCallback === 'function') {
+        video.requestVideoFrameCallback(onNewFrame);
+      }
+    };
+    newEntry.onNewFrame = onNewFrame;
+
+    if (typeof video.requestVideoFrameCallback === 'function') {
+      video.requestVideoFrameCallback(onNewFrame);
+    } else {
+      video.addEventListener('timeupdate', onNewFrame);
+    }
+
     return newEntry;
   }
 
@@ -187,12 +218,20 @@ export class TextureCache {
     const activeSet = new Set(activeIds);
     for (const [id, entry] of this.videos) {
       if (!activeSet.has(id)) {
-        entry.video.pause();
-        entry.video.src = '';
-        this.gl.deleteTexture(entry.tex);
+        this._destroyVideoEntry(entry);
         this.videos.delete(id);
       }
     }
+  }
+
+  _destroyVideoEntry(entry) {
+    if (entry.onNewFrame) {
+      entry.video.removeEventListener('timeupdate', entry.onNewFrame);
+    }
+    entry.corsBlocked = true; // stop any in-flight requestVideoFrameCallback
+    entry.video.pause();
+    entry.video.src = '';
+    this.gl.deleteTexture(entry.tex);
   }
 
   // Compute UV crop rect for object-fit: cover
@@ -219,9 +258,7 @@ export class TextureCache {
       gl.deleteTexture(entry.tex);
     }
     for (const entry of this.videos.values()) {
-      entry.video.pause();
-      entry.video.src = '';
-      gl.deleteTexture(entry.tex);
+      this._destroyVideoEntry(entry);
     }
     gl.deleteTexture(this.fallback.tex);
     gl.deleteTexture(this.transparent.tex);
