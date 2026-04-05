@@ -136,9 +136,7 @@ void main() {
   if (u_isSelection != 0) {
     float outlineWidth = 1.5;
     float outerDist = roundedBoxSDF(p, halfSize + outlineWidth, r + outlineWidth);
-    float aa = 1.0 - smoothstep(-0.5, 0.5, outerDist);
-    float inner = 1.0 - smoothstep(-0.5, 0.5, dist);
-    float outline = aa - inner;
+    float outline = step(outerDist, 0.0) - step(dist, 0.0);
     outColor = vec4(0.173, 0.518, 0.859, outline * 0.7); // #2C84DB
     if (outColor.a < 0.01) discard;
     return;
@@ -154,13 +152,11 @@ void main() {
   }
 
   // Outside rounded box
-  if (dist > 0.5) discard;
-
-  float aa = 1.0 - smoothstep(0.0, 0.5, dist);
+  if (dist > 0.0) discard;
 
   // Border
   if (u_borderWidth > 0.0 && dist > -(u_borderWidth)) {
-    outColor = vec4(u_borderColor.rgb, u_borderColor.a * aa * u_opacity);
+    outColor = vec4(u_borderColor.rgb, u_borderColor.a * u_opacity);
     return;
   }
 
@@ -174,7 +170,7 @@ void main() {
     col = u_color;
   }
 
-  outColor = vec4(col.rgb, col.a * aa * u_opacity);
+  outColor = vec4(col.rgb, col.a * u_opacity);
 }
 `;
 
