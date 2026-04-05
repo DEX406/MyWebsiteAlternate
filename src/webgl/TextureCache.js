@@ -165,13 +165,20 @@ export class TextureCache {
       this._destroyVideoEntry(entry);
     }
 
-    // Create new video element
+    // Create new video element.
+    // Must be attached to the document so that requestVideoFrameCallback fires
+    // and so that autoplay works on mobile browsers (iOS Safari requires a
+    // connected element to honour muted autoplay).
     const video = document.createElement('video');
     video.crossOrigin = 'anonymous';
     video.autoplay = true;
     video.loop = true;
     video.muted = true;
     video.playsInline = true;
+    // Position off-screen (1 px, opacity 0) — avoids display:none which
+    // can suppress frame callbacks in some browsers.
+    video.style.cssText = 'position:fixed;top:-2px;left:-2px;width:1px;height:1px;opacity:0;pointer-events:none;';
+    document.body.appendChild(video);
     video.src = src;
     const playPromise = video.play();
     if (playPromise !== undefined) playPromise.catch(() => {});
@@ -231,6 +238,7 @@ export class TextureCache {
     entry.corsBlocked = true; // stop any in-flight requestVideoFrameCallback
     entry.video.pause();
     entry.video.src = '';
+    if (entry.video.parentNode) entry.video.parentNode.removeChild(entry.video);
     this.gl.deleteTexture(entry.tex);
   }
 
