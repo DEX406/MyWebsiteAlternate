@@ -43,7 +43,7 @@ export class TextRenderer {
   // Returns { tex, width, height }
   get(item, zoom) {
     const dpr = window.devicePixelRatio || 1;
-    const scale = this._snapScale(Math.min(zoom * dpr, 4));
+    const scale = this._snapScale(zoom * dpr);
 
     const key = this._key(item, scale);
     this._usedThisFrame.add(key);
