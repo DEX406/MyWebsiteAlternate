@@ -92,17 +92,14 @@ export function useMipmap(items, updateItem, vp) {
     if (settled > 0) computeDisplaySources();
   }, [settled, computeDisplaySources]);
 
-  // Also evaluate when mipmaps become available or item dimensions change
+  // Also evaluate once when mipmaps become available
   const prevMipmapCountRef = useRef(0);
-  const prevItemDimsRef = useRef('');
   useEffect(() => {
     const count = items.filter(i => i.srcQ50 || i.srcQ25 || i.srcQ12 || i.srcQ6).length;
-    const dims = items.filter(i => i.type === 'image').map(i => `${i.id}:${i.w}x${i.h}`).join(',');
-    if (count > prevMipmapCountRef.current || dims !== prevItemDimsRef.current) {
+    if (count > prevMipmapCountRef.current) {
       computeDisplaySources();
     }
     prevMipmapCountRef.current = count;
-    prevItemDimsRef.current = dims;
   }, [items, computeDisplaySources]);
 }
 
