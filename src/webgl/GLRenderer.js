@@ -194,7 +194,9 @@ export class GLRenderer {
   render({ items, panX, panY, zoom, bgGrid, globalShadow, selectedIds, editingTextId }) {
     const gl = this.gl;
     const dpr = (window.devicePixelRatio || 1) * SUPERSAMPLE;
+    this.currentZoom = zoom; // raw zoom, used by text rasterizer (no supersample)
 
+    this.textRenderer.beginFrame();
     this.resize();
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 
@@ -238,7 +240,7 @@ export class GLRenderer {
         this._renderConnector(item, panX * dpr, panY * dpr, zoom * dpr, cssW * dpr, cssH * dpr);
       } else {
         if (item.x + item.w < vpLeft || item.x > vpRight || item.y + item.h < vpTop || item.y > vpBottom) continue;
-        this._renderItem(item, panX * dpr, panY * dpr, zoom * dpr, cssW * dpr, cssH * dpr, globalShadow, editingTextId);
+        this._renderItem(item, panX * dpr, panY * dpr, zoom * dpr, cssW * dpr, cssH * dpr, globalShadow, editingTextId, this.currentZoom);
       }
     }
 
@@ -253,6 +255,8 @@ export class GLRenderer {
     // Prune video textures for removed items
     const videoIds = items.filter(i => i.type === 'video').map(i => i.id);
     this.texCache.pruneVideos(videoIds);
+
+    this.textRenderer.endFrame();
   }
 
   _renderGrid(bgGrid, panX, panY, zoom, dpr, fade) {
@@ -290,7 +294,7 @@ export class GLRenderer {
     gl.bindVertexArray(null);
   }
 
-  _renderItem(item, panX, panY, zoom, resW, resH, globalShadow, editingTextId) {
+  _renderItem(item, panX, panY, zoom, resW, resH, globalShadow, editingTextId, currentZoom) {
     const gl = this.gl;
     gl.useProgram(this.quadProg);
     gl.bindVertexArray(this.quadVAO);
@@ -378,8 +382,8 @@ export class GLRenderer {
       gl.uniform4f(u.u_texCrop, crop[0], crop[1], crop[2], crop[3]);
       gl.uniform4f(u.u_color, 0, 0, 0, 1);
     } else if (item.type === 'text' || item.type === 'link') {
-      // Render text to texture
-      const entry = this.textRenderer.get(item);
+      // Render text to texture at zoom-appropriate resolution
+      const entry = this.textRenderer.get(item, currentZoom);
       gl.uniform1i(u.u_textured, 1);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, entry.tex);

@@ -1,42 +1,63 @@
 // Renders text items to offscreen Canvas2D and uploads as WebGL textures.
-// Caches based on a hash of all text-affecting properties.
+// Textures are keyed by item properties + raster scale, and evicted each frame
+// if the item was not visible, so only on-screen text at the current zoom is kept.
 
 export class TextRenderer {
   constructor(gl) {
     this.gl = gl;
-    this.cache = new Map(); // hash → { tex, width, height }
+    this.cache = new Map(); // key → { tex, width, height }
     this.canvas = document.createElement('canvas');
     this.ctx = this.canvas.getContext('2d');
+    this._usedThisFrame = new Set();
   }
 
-  // Generate a cache key from item properties
-  _key(item) {
-    return `${item.id}|${item.text}|${item.fontSize}|${item.fontFamily}|${item.color}|${item.bold}|${item.italic}|${item.align}|${item.w}|${item.h}|${item.bgColor}|${item.bgOpacity ?? 1}`;
+  // Call once at the start of each render frame.
+  beginFrame() {
+    this._usedThisFrame = new Set();
   }
 
-  // Get or create a texture for a text/link item.
-  // Returns { tex, width, height }
-  get(item) {
-    const key = this._key(item);
-    const cached = this.cache.get(key);
-    if (cached) {
-      cached.lastUsed = performance.now();
-      return cached;
+  // Call once at the end of each render frame.
+  // Evicts any texture that was not accessed this frame.
+  endFrame() {
+    for (const [key, entry] of this.cache) {
+      if (!this._usedThisFrame.has(key)) {
+        this.gl.deleteTexture(entry.tex);
+        this.cache.delete(key);
+      }
     }
+  }
 
-    const entry = this._render(item);
-    entry.lastUsed = performance.now();
+  // Generate a cache key from item properties + raster scale.
+  _key(item, scale) {
+    return `${item.id}|${item.text}|${item.fontSize}|${item.fontFamily}|${item.color}|${item.bold}|${item.italic}|${item.align}|${item.w}|${item.h}|${item.bgColor}|${item.bgOpacity ?? 1}|${scale}`;
+  }
+
+  // Snap scale to nearest 0.25 to avoid re-rasterizing on every frame during
+  // a smooth zoom gesture, while still re-rasterizing at meaningful resolution steps.
+  _snapScale(rawScale) {
+    return Math.round(rawScale * 4) / 4;
+  }
+
+  // Get or create a texture for a text/link item at the current zoom level.
+  // zoom is the raw canvas zoom (1.0 = 100%). DPR is factored in here.
+  // Returns { tex, width, height }
+  get(item, zoom) {
+    const dpr = window.devicePixelRatio || 1;
+    const scale = this._snapScale(Math.min(zoom * dpr, 4));
+
+    const key = this._key(item, scale);
+    this._usedThisFrame.add(key);
+
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+
+    const entry = this._render(item, scale);
     this.cache.set(key, entry);
-
-    // Evict old entries if cache is large
-    if (this.cache.size > 200) this._evict();
-
     return entry;
   }
 
-  _render(item) {
+  _render(item, scale) {
     const gl = this.gl;
-    const scale = Math.min(window.devicePixelRatio || 1, 2); // cap at 2x for perf
     const w = Math.ceil(item.w * scale);
     const h = Math.ceil(item.h * scale);
 
@@ -135,16 +156,6 @@ export class TextRenderer {
     const g = parseInt(hex.slice(2, 4), 16);
     const b = parseInt(hex.slice(4, 6), 16);
     return op >= 1 ? item.bgColor : `rgba(${r},${g},${b},${op})`;
-  }
-
-  _evict() {
-    // Remove oldest 50 entries
-    const entries = [...this.cache.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-    const toRemove = entries.slice(0, 50);
-    for (const [key, entry] of toRemove) {
-      this.gl.deleteTexture(entry.tex);
-      this.cache.delete(key);
-    }
   }
 
   // Invalidate a specific item's cache (call when item text/style changes)
