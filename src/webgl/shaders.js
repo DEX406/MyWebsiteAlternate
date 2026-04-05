@@ -154,9 +154,9 @@ void main() {
   }
 
   // Outside rounded box
-  if (dist > 1.0) discard;
+  if (dist > 0.5) discard;
 
-  float aa = 1.0 - smoothstep(0.0, 1.0, dist);
+  float aa = 1.0 - smoothstep(0.0, 0.5, dist);
 
   // Border
   if (u_borderWidth > 0.0 && dist > -(u_borderWidth)) {
