@@ -368,8 +368,8 @@ export function PropertiesPanel({ isAdmin, selectedIds, items, openColorPicker, 
 
           {!isMulti && (
             <div style={{ display: "flex", gap: GAP }}>
-              {[1, 0.5].map(s => (
-                <Toggle key={s} label={s === 1 ? "1:1" : "1:2"} active={false} flex onClick={() => {
+              {[1, 0.5, 0.25].map(s => (
+                <Toggle key={s} label={s === 1 ? "1:1" : s === 0.5 ? "1:2" : "1:4"} active={false} flex onClick={() => {
                   if (type === "video") {
                     const nw = sel.naturalWidth, nh = sel.naturalHeight;
                     if (nw && nh) updateItem(sel.id, { w: Math.round(nw * s), h: Math.round(nh * s) });
