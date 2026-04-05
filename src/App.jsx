@@ -646,7 +646,7 @@ export default function App() {
               onTouchStart={e => e.stopPropagation()}
               style={{
                 position: "absolute", left: px, top: py, width: sw, height: sh,
-                transform: `rotate(${item.rotation || 0}deg)`, transformOrigin: "0 0",
+                transform: `rotate(${item.rotation || 0}deg)`, transformOrigin: "center center",
                 resize: "none", border: "none", outline: "2px solid rgba(44,132,219,0.7)",
                 touchAction: "auto", background: applyBg,
                 color: item.color, fontSize: (item.fontSize || 24) * z,
